@@ -1,7 +1,9 @@
 packages:
   - apps/*
   - packages/*
+  - services/*
 allowBuilds:
   sharp: false
   unrs-resolver: false
   msw: false
+  esbuild: false
