@@ -18,11 +18,9 @@ const config = loadConfig({
 
 // SRD §8.7 testnet numbers
 const contractConfig: ContractConfig = {
-  types: {
-    extract: { band_min: "300000", band_max: "1500000" },
-    summary: { band_min: "200000", band_max: "1000000" },
-    thread: { band_min: "500000", band_max: "2000000" },
-  },
+  extract: { band_min: "300000", band_max: "1500000" },
+  summary: { band_min: "200000", band_max: "1000000" },
+  thread: { band_min: "500000", band_max: "2000000" },
   worker_cap_bps: 5000,
   review_fee: "50000",
   referral_bps: 750,
@@ -31,10 +29,7 @@ const contractConfig: ContractConfig = {
   strike_threshold: 3,
   suspend_threshold: 3,
   max_unresolved_open: 2,
-  unresolved_timeout_secs: 604800,
   work_deadline_secs: 600,
-  review_deadline_secs: 600,
-  dispute_window_secs: 3600,
   complaint_window_secs: 86400,
   job_timeout_secs: 21600,
 };

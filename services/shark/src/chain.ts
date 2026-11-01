@@ -4,9 +4,8 @@ import type { JobType } from "@shark/shared";
 
 export type ChainState = "ok" | "paused" | "caged" | "closed";
 
-/** `get_config` as the contract returns it (SRD §8.4, U128 as strings). */
-export type ContractConfig = {
-  types: Record<JobType, { band_min: string; band_max: string }>;
+/** `get_config` exactly as contracts/company returns it (U128 as strings). */
+export type ContractConfig = Record<JobType, { band_min: string; band_max: string }> & {
   worker_cap_bps: number;
   review_fee: string;
   referral_bps: number;
@@ -15,10 +14,7 @@ export type ContractConfig = {
   strike_threshold: number;
   suspend_threshold: number;
   max_unresolved_open: number;
-  unresolved_timeout_secs: number;
   work_deadline_secs: number;
-  review_deadline_secs: number;
-  dispute_window_secs: number;
   complaint_window_secs: number;
   job_timeout_secs: number;
 };

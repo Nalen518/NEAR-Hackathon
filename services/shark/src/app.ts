@@ -40,7 +40,7 @@ export function createApp({ config, chain }: Deps) {
     const types = Object.fromEntries(
       JobType.options.map((t, i) => [
         t,
-        { band: { min: fromBase(BigInt(cfg.types[t].band_min)), max: fromBase(BigInt(cfg.types[t].band_max)) }, floor: fromBase(BigInt(floors[i])) },
+        { band: { min: fromBase(BigInt(cfg[t].band_min)), max: fromBase(BigInt(cfg[t].band_max)) }, floor: fromBase(BigInt(floors[i])) },
       ]),
     ) as Prices["types"];
     // shortcut: recentQuotes stays empty until quotes are stored (POST /v1/orders)
