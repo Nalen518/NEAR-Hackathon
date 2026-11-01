@@ -1,0 +1,88 @@
+{
+  "orderId": null,
+  "quoteId": "q_01JC8Z3R9X0V4G7K2M5N8P1Q3S",
+  "jobType": "summary",
+  "price": "0.60",
+  "band": {
+    "min": "0.20",
+    "max": "1.00"
+  },
+  "floor": "0.12",
+  "priceReason": "6 pages, 2 required points",
+  "input": {
+    "inputHash": "sha256:4c1eSAMPLE",
+    "pages": 6,
+    "words": 3120,
+    "source": "https://example.com/blog/intents-explained"
+  },
+  "brief": {
+    "jobType": "summary",
+    "params": {
+      "maxWords": 150,
+      "mustMention": [
+        "NEAR Intents",
+        "fees"
+      ],
+      "language": "en",
+      "format": "paragraph"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "word_count <= 150"
+      },
+      {
+        "id": "C2",
+        "kind": "code",
+        "rule": "mentions_all"
+      },
+      {
+        "id": "C3",
+        "kind": "code",
+        "rule": "language == en"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "every claim is supported by the source"
+      },
+      {
+        "id": "M2",
+        "kind": "model",
+        "rule": "covers the source's main point"
+      }
+    ],
+    "deliverableFormat": "text/plain"
+  },
+  "briefHash": "sha256:a91fSAMPLE",
+  "quote": {
+    "quote_id": "q_01JC8Z3R9X0V4G7K2M5N8P1Q3S",
+    "network": "near:testnet",
+    "job_type": "summary",
+    "price": "600000",
+    "payer": "demo-buyer.testnet",
+    "input_hash": "sha256:4c1eSAMPLE",
+    "brief_hash": "sha256:a91fSAMPLE",
+    "referrer": "ref-agent.testnet",
+    "expires_at": 1793521364
+  },
+  "sig": "ed25519:SAMPLE",
+  "pay": {
+    "network": "near:testnet",
+    "token": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+    "method": "ft_transfer_call",
+    "args": {
+      "receiver_id": "sharkco.testnet",
+      "amount": "600000",
+      "msg": "pay:SAMPLE"
+    },
+    "gas": "100000000000000",
+    "deposit": "1"
+  },
+  "payerRegistered": true,
+  "register": null,
+  "intents": null,
+  "expiresAt": "2026-11-05T08:22:44Z",
+  "charged": false
+}

@@ -1,0 +1,7 @@
+{
+  "ok": true,
+  "network": "near:testnet",
+  "state": "ok",
+  "contract": "sharkco.testnet",
+  "version": "0.1.0"
+}

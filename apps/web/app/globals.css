@@ -1,0 +1,291 @@
+@import "tailwindcss";
+
+/* Tokens: docs/brand/tokens.json + Figma Foundations 8:2. Light "paper" theme only. */
+@theme {
+  --color-bg: #f5f6f8;
+  --color-surface: #fcfcfd;
+  --color-surface-2: #eceef2;
+  --color-tile: #e9edf2;
+  --color-line: #dadde3;
+  --color-line-strong: #b5bac4;
+  --color-ink: #161a22;
+  --color-muted: #5a606c;
+  --color-faint: #8b919c;
+  --color-accent: #2b59ff; /* CTAs, links, focus only */
+  --color-gain: #147a44; /* money up only */
+  --color-loss: #c2362b; /* money down only */
+  /* Characters (colour = who). Crab per D-167. */
+  --color-shark: #6e8ba8;
+  --color-owl: #a86b32;
+  --color-raven: #5e5a86;
+  --color-crab: #e07a5f;
+  --color-crab-belly: #efa08a;
+
+  --radius-sm: 4px;
+  --radius-md: 10px;
+  --radius-pane: 22px;
+  --radius-pill: 999px;
+
+  --font-grotesk: var(--font-schibsted), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --font-hand: var(--font-patrick), cursive;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* expo out */
+  --ease-quart: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* Text styles — same names as the Figma styles (prompt §3.4). */
+@utility display-hero {
+  font-family: var(--font-grotesk);
+  font-weight: 800;
+  font-size: 92px;
+  line-height: 0.94;
+  letter-spacing: -0.045em;
+  text-transform: uppercase;
+}
+@utility display-xl {
+  font-family: var(--font-grotesk);
+  font-weight: 800;
+  font-size: 72px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+@utility display-l {
+  font-family: var(--font-grotesk);
+  font-weight: 600;
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+@utility display-m {
+  font-family: var(--font-grotesk);
+  font-weight: 600;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+@utility display-s {
+  font-family: var(--font-grotesk);
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+}
+@utility body-default {
+  font-family: var(--font-grotesk);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.55;
+}
+@utility body-small {
+  font-family: var(--font-grotesk);
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1.5;
+}
+@utility mono-lede {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 17px;
+  line-height: 1.65;
+}
+@utility mono-data {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+@utility mono-label {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+@utility mono-small {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.5;
+}
+@utility mono-chip {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+@utility mono-button {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+@utility figure-l {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+@utility figure-m {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+@utility hand-eyebrow {
+  font-family: var(--font-hand);
+  font-weight: 400;
+  font-size: 22px;
+  line-height: 1.3;
+}
+@utility brand-wordmark {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 1;
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    min-width: 1024px; /* desktop and laptop only (D-050) */
+  }
+  body {
+    font-family: var(--font-grotesk);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+/* Motion spec v1.0 (38:535). Everything is static under reduced motion. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(14px); filter: blur(14px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes card-flip {
+  from { opacity: 0; transform: rotateY(360deg) scale(0.5); filter: blur(10px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes bob {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50% { transform: translateY(-10px) rotate(-2deg); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse-ring {
+  from { box-shadow: 0 0 0 0 rgb(43 89 255 / 0.5); }
+  to { box-shadow: 0 0 0 10px rgb(43 89 255 / 0); }
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@keyframes stamp {
+  from { opacity: 0; transform: scale(1.3) rotate(-8deg); }
+  to { opacity: 1; transform: rotate(-8deg); }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes print-in {
+  from { opacity: 0; clip-path: inset(0 0 100% 0); }
+  to { opacity: 1; clip-path: inset(0); }
+}
+@keyframes nudge {
+  0%, 100% { transform: none; }
+  30% { transform: translateX(-4px); }
+  60% { transform: translateX(3px); }
+}
+@keyframes mist-drift {
+  to { transform: translateX(-160px); }
+}
+@keyframes bid-in {
+  from { opacity: 0; transform: translateY(12px); }
+}
+@keyframes winner-fill {
+  from { background-color: var(--color-surface); border-color: var(--color-line); }
+}
+@keyframes chip-pop {
+  from { transform: scale(0.9); opacity: 0; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+@keyframes tick {
+  from { transform: scale(0.8); opacity: 0.2; }
+}
+@keyframes flip-y {
+  from { transform: rotateY(90deg); }
+}
+@keyframes loop-spin {
+  from { transform: rotate(-360deg); }
+}
+@keyframes coin-in {
+  from { transform: translateX(-24px); opacity: 0; }
+}
+@keyframes coin-back {
+  to { transform: translateX(-24px); opacity: 0; }
+}
+@keyframes shackle {
+  from { transform: translateY(-3px); }
+}
+@keyframes cage-drop {
+  from { opacity: 0.15; transform: translateY(-10px); }
+}
+@keyframes grow-x {
+  from { transform: scaleX(0); }
+}
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+.stamp { transform: rotate(-8deg); }
+/* Play: hold animations at their first frame until the box scrolls into view. */
+[data-play="false"] [class*="anim-"] { animation-play-state: paused; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .anim-stamp { animation: stamp 280ms var(--ease-quart) both; }
+  .anim-slide { animation: slide-in 280ms var(--ease-quart) both; }
+  .anim-mist { animation: mist-drift 20s linear infinite alternate; will-change: transform; }
+  .anim-bid { animation: bid-in 280ms var(--ease-quart) both; }
+  .anim-winner { animation: winner-fill 280ms var(--ease-quart) both; }
+  .anim-chip { animation: chip-pop 180ms var(--ease-quart) both; }
+  .anim-fade { animation: fade-in 280ms var(--ease-quart) both; }
+  .anim-tick { animation: tick 160ms var(--ease-quart) both; }
+  .anim-flipy { animation: flip-y 360ms var(--ease-out) both; }
+  .anim-loop { display: inline-block; animation: loop-spin 400ms var(--ease-quart) both; }
+  .anim-coin { animation: coin-in 400ms var(--ease-quart) both; }
+  .anim-coinback { animation: coin-back 320ms var(--ease-quart) 300ms both; }
+  .anim-shackle { animation: shackle 180ms var(--ease-quart) 200ms both; }
+  .anim-cage { animation: cage-drop 420ms var(--ease-quart) both; }
+  .anim-grow { transform-origin: left; animation: grow-x 280ms var(--ease-quart) both; }
+  .anim-row { animation: row-in 240ms var(--ease-quart) both; }
+  .anim-pillpop { animation: chip-pop 180ms var(--ease-quart) both; }
+  .anim-nudge { animation: nudge 280ms var(--ease-quart) 400ms both; }
+  .anim-print { animation: print-in 600ms var(--ease-quart) both; }
+  .anim-rise { animation: rise-in 700ms var(--ease-out) both; }
+  .anim-flip { animation: card-flip 1.5s var(--ease-out) 250ms both; }
+  .anim-bob { animation: bob 6s ease-in-out 1.75s infinite; }
+  .anim-pop { animation: pop-in 650ms var(--ease-out) both; }
+  .anim-orbit { animation: spin 14s linear infinite; }
+  .anim-pulse { animation: pulse-ring 2.4s var(--ease-out) infinite; }
+  .anim-blink { animation: blink 1s steps(1) infinite; }
+}

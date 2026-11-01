@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Icon">
+<path id="Vector" d="M18 3H6C4.34315 3 3 4.34315 3 6V9C3 10.6569 4.34315 12 6 12H18C19.6569 12 21 10.6569 21 9V6C21 4.34315 19.6569 3 18 3Z" fill="#ECEEF2" stroke-width="2" stroke="#161A22"/>
+<path id="Vector_2" d="M22 16H10C8.34315 16 7 17.3431 7 19V22C7 23.6569 8.34315 25 10 25H22C23.6569 25 25 23.6569 25 22V19C25 17.3431 23.6569 16 22 16Z" fill="#ECEEF2" stroke-width="2" stroke="#161A22"/>
+<g id="Vector_3">
+<path d="M8 12V16Z" fill="black"/>
+<path d="M8 12V16" stroke-width="2" stroke="#161A22"/>
+</g>
+</g>
+</svg>

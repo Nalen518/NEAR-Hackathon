@@ -1,0 +1,20 @@
+{
+  "network": "near:testnet",
+  "options": [
+    {
+      "method": "quote",
+      "token": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+      "label": "test USDC (no real value)",
+      "faucet": {
+        "url": "https://faucet.circle.com/"
+      }
+    },
+    {
+      "method": "x402",
+      "scheme": "exact",
+      "network": "near:testnet",
+      "asset": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+      "facilitator": "https://test.x402.mikedotexe.com"
+    }
+  ]
+}

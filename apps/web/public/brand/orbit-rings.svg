@@ -1,0 +1,11 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="620" height="620" viewBox="0 0 620 620" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Orbit rings">
+<g id="Group">
+<path id="Vector" d="M618 310C618 480.104 480.104 618 310 618C139.896 618 2 480.104 2 310C2 139.896 139.896 2 310 2C480.104 2 618 139.896 618 310Z" stroke="#2B59FF" stroke-opacity="0.16"/>
+<path id="Vector_2" d="M546 310C546 440.339 440.339 546 310 546C179.661 546 74 440.339 74 310C74 179.661 179.661 74 310 74C440.339 74 546 179.661 546 310Z" stroke="#2B59FF" stroke-opacity="0.26"/>
+<path id="Vector_3" d="M474 310C474 400.575 400.575 474 310 474C219.425 474 146 400.575 146 310C146 219.425 219.425 146 310 146C400.575 146 474 219.425 474 310Z" stroke="#2B59FF" stroke-opacity="0.38"/>
+</g>
+<path id="Vector_4" d="M310 80C313.314 80 316 77.3137 316 74C316 70.6863 313.314 68 310 68C306.686 68 304 70.6863 304 74C304 77.3137 306.686 80 310 80Z" fill="#2B59FF"/>
+<path id="Vector_5" d="M310 85C316.075 85 321 80.0751 321 74C321 67.9249 316.075 63 310 63C303.925 63 299 67.9249 299 74C299 80.0751 303.925 85 310 85Z" fill="#2B59FF" fill-opacity="0.18"/>
+</g>
+</svg>

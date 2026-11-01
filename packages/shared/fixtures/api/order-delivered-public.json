@@ -1,0 +1,155 @@
+{
+  "orderId": "j_000042",
+  "status": "delivered",
+  "network": "near:testnet",
+  "jobType": "summary",
+  "price": "0.60",
+  "briefHash": "sha256:a91fSAMPLE",
+  "inputHash": "sha256:4c1eSAMPLE",
+  "timeline": [
+    {
+      "at": "2026-11-05T08:13:02Z",
+      "event": "paid",
+      "amount": "0.60",
+      "tx": "SAMPLEtx4kPa1"
+    },
+    {
+      "at": "2026-11-05T08:13:25Z",
+      "event": "awarded",
+      "worker": "crab",
+      "amount": "0.18",
+      "tx": "SAMPLEtxAw1"
+    },
+    {
+      "at": "2026-11-05T08:14:40Z",
+      "event": "delivered_for_review",
+      "worker": "crab",
+      "round": 1
+    },
+    {
+      "at": "2026-11-05T08:15:05Z",
+      "event": "review_pass",
+      "round": 1
+    },
+    {
+      "at": "2026-11-05T08:15:09Z",
+      "event": "worker_paid",
+      "worker": "crab",
+      "amount": "0.18",
+      "tx": "SAMPLEtx8Hdq1"
+    },
+    {
+      "at": "2026-11-05T08:15:09Z",
+      "event": "reviewer_paid",
+      "amount": "0.05",
+      "tx": "SAMPLEtx8Hdq1"
+    }
+  ],
+  "auction": {
+    "cap": "0.30",
+    "bids": [
+      {
+        "worker": "crab",
+        "price": "0.18",
+        "etaSecs": 70,
+        "state": "winner"
+      },
+      {
+        "worker": "raven",
+        "price": "0.24",
+        "etaSecs": 45,
+        "state": "lost"
+      }
+    ],
+    "reason": "Crab is cheaper with a 93% first pass rate. The 70 s ETA fits the deadline.",
+    "reasonHash": "sha256:3f0aSAMPLE"
+  },
+  "reviews": [
+    {
+      "round": 1,
+      "mode": "primary",
+      "pass": true,
+      "codes": [
+        "PASS"
+      ],
+      "reasons": "All checks passed.",
+      "attestationUrl": "https://example.com/attestation/j_000042",
+      "checks": [
+        {
+          "id": "C1",
+          "pass": true,
+          "detail": "142 words"
+        },
+        {
+          "id": "C2",
+          "pass": true,
+          "detail": "both found"
+        },
+        {
+          "id": "C3",
+          "pass": true,
+          "detail": "en"
+        },
+        {
+          "id": "M1",
+          "pass": true
+        },
+        {
+          "id": "M2",
+          "pass": true
+        }
+      ]
+    }
+  ],
+  "money": {
+    "method": "quote",
+    "price": "0.60",
+    "workerFee": "0.18",
+    "reviewFee": "0.05",
+    "referral": "0.045",
+    "owners": "0.195",
+    "reserve": "0.13"
+  },
+  "complaint": {
+    "allowedUntil": "2026-11-06T08:15:05Z",
+    "status": null
+  },
+  "refund": null,
+  "proof": {
+    "paymentTx": "SAMPLEtx4kPa1",
+    "awardTx": "SAMPLEtxAw1",
+    "workerPayoutTx": "SAMPLEtx8Hdq1",
+    "contractTxs": [
+      "SAMPLEtx4kPa1",
+      "SAMPLEtxAw1",
+      "SAMPLEtx8Hdq1"
+    ]
+  },
+  "sample": true,
+  "view": "public",
+  "brief": {
+    "jobType": "summary",
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code"
+      },
+      {
+        "id": "C2",
+        "kind": "code"
+      },
+      {
+        "id": "C3",
+        "kind": "code"
+      },
+      {
+        "id": "M1",
+        "kind": "model"
+      },
+      {
+        "id": "M2",
+        "kind": "model"
+      }
+    ]
+  }
+}

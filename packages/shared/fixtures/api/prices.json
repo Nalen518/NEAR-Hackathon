@@ -1,0 +1,72 @@
+{
+  "types": {
+    "extract": {
+      "band": {
+        "min": "0.30",
+        "max": "1.50"
+      },
+      "floor": "0.20"
+    },
+    "summary": {
+      "band": {
+        "min": "0.20",
+        "max": "1.00"
+      },
+      "floor": "0.12"
+    },
+    "thread": {
+      "band": {
+        "min": "0.50",
+        "max": "2.00"
+      },
+      "floor": "0.24"
+    }
+  },
+  "recentQuotes": [
+    {
+      "at": "2026-11-05T08:12:00Z",
+      "jobType": "summary",
+      "price": "0.60",
+      "reason": "6 pages, 2 required points",
+      "status": "paid",
+      "returnReason": null,
+      "tx": "SAMPLEtx4kPa1"
+    },
+    {
+      "at": "2026-11-05T07:58:00Z",
+      "jobType": "thread",
+      "price": "0.20",
+      "reason": "Short thread, no links",
+      "status": "returned",
+      "returnReason": "E_PRICE_BELOW_FLOOR",
+      "tx": "SAMPLEtxR1"
+    },
+    {
+      "at": "2026-11-05T07:50:00Z",
+      "jobType": "thread",
+      "price": "1.20",
+      "reason": "5 posts, 2 must include",
+      "status": "paid",
+      "returnReason": null,
+      "tx": "SAMPLEtxT1"
+    },
+    {
+      "at": "2026-11-05T07:31:00Z",
+      "jobType": "extract",
+      "price": "0.80",
+      "reason": "24 records, 3 fields",
+      "status": "paid",
+      "returnReason": null,
+      "tx": "SAMPLEtxE1"
+    },
+    {
+      "at": "2026-11-05T07:02:00Z",
+      "jobType": "summary",
+      "price": "0.35",
+      "reason": "2 pages, no required points",
+      "status": "expired",
+      "returnReason": null,
+      "tx": null
+    }
+  ]
+}

@@ -1,0 +1,487 @@
+{
+  "network": "near:testnet",
+  "state": "ok",
+  "strikes": {
+    "count": 1,
+    "threshold": 3
+  },
+  "reserve": {
+    "balance": "40.10",
+    "floor": "12.10",
+    "sharkWallet": "3.10",
+    "dailyBudget": "4.00",
+    "ravenPayoutGas": {
+      "balanceEth": "0.0041",
+      "payoutsLeft": 23,
+      "warnBelow": 5
+    }
+  },
+  "pnl7d": {
+    "jobs": 200,
+    "revenue": "128.00",
+    "workers": "38.40",
+    "reviews": "10.00",
+    "referrals": "9.60",
+    "profit": "70.00",
+    "ownersPaid": "36.00",
+    "ownersAccrued": "6.00"
+  },
+  "prices": {
+    "types": {
+      "extract": {
+        "band": {
+          "min": "0.30",
+          "max": "1.50"
+        },
+        "floor": "0.20"
+      },
+      "summary": {
+        "band": {
+          "min": "0.20",
+          "max": "1.00"
+        },
+        "floor": "0.12"
+      },
+      "thread": {
+        "band": {
+          "min": "0.50",
+          "max": "2.00"
+        },
+        "floor": "0.24"
+      }
+    },
+    "recentQuotes": [
+      {
+        "at": "2026-11-05T08:12:00Z",
+        "jobType": "summary",
+        "price": "0.60",
+        "reason": "6 pages, 2 required points",
+        "status": "paid",
+        "returnReason": null,
+        "tx": "SAMPLEtx4kPa1"
+      },
+      {
+        "at": "2026-11-05T07:58:00Z",
+        "jobType": "thread",
+        "price": "0.20",
+        "reason": "Short thread, no links",
+        "status": "returned",
+        "returnReason": "E_PRICE_BELOW_FLOOR",
+        "tx": "SAMPLEtxR1"
+      },
+      {
+        "at": "2026-11-05T07:50:00Z",
+        "jobType": "thread",
+        "price": "1.20",
+        "reason": "5 posts, 2 must include",
+        "status": "paid",
+        "returnReason": null,
+        "tx": "SAMPLEtxT1"
+      },
+      {
+        "at": "2026-11-05T07:31:00Z",
+        "jobType": "extract",
+        "price": "0.80",
+        "reason": "24 records, 3 fields",
+        "status": "paid",
+        "returnReason": null,
+        "tx": "SAMPLEtxE1"
+      },
+      {
+        "at": "2026-11-05T07:02:00Z",
+        "jobType": "summary",
+        "price": "0.35",
+        "reason": "2 pages, no required points",
+        "status": "expired",
+        "returnReason": null,
+        "tx": null
+      }
+    ]
+  },
+  "workers": [
+    {
+      "suspendThreshold": 3,
+      "maxUnresolvedOpen": 2,
+      "suspended": false,
+      "eligible": true,
+      "ineligibleReason": null,
+      "types": [
+        "extract",
+        "summary",
+        "thread"
+      ],
+      "id": "crab",
+      "account": "crab-worker.testnet",
+      "payoutChain": "near",
+      "minFee": {
+        "extract": "0.10",
+        "summary": "0.06",
+        "thread": "0.12"
+      },
+      "jobs": 124,
+      "firstPassPct": 93,
+      "finalFails": 2,
+      "disputesWon": 1,
+      "disputesLost": 0,
+      "unresolvedOpen": 0,
+      "late": 1
+    },
+    {
+      "suspendThreshold": 3,
+      "maxUnresolvedOpen": 2,
+      "suspended": false,
+      "eligible": true,
+      "ineligibleReason": null,
+      "types": [
+        "extract",
+        "summary",
+        "thread"
+      ],
+      "id": "raven",
+      "account": "raven-worker.testnet",
+      "payoutChain": "base",
+      "minFee": {
+        "extract": "0.14",
+        "summary": "0.08",
+        "thread": "0.18"
+      },
+      "jobs": 76,
+      "firstPassPct": 89,
+      "finalFails": 3,
+      "disputesWon": 0,
+      "disputesLost": 0,
+      "unresolvedOpen": 1,
+      "late": 0
+    }
+  ],
+  "reviewer": {
+    "id": "owl",
+    "account": "owl-reviewer.testnet",
+    "reviews": 214,
+    "overturned": 3,
+    "reviewFee": "0.05",
+    "suspended": false
+  },
+  "recentJobs": [
+    {
+      "orderId": "j_000042",
+      "jobType": "summary",
+      "price": "0.60",
+      "worker": "crab",
+      "payoutChain": "near",
+      "status": "finalized",
+      "referral": "0.045",
+      "attestationUrl": "https://example.com/attestation/j_000042",
+      "workerPayoutTx": "SAMPLEtx8Hdq1",
+      "at": "2026-11-05T08:15:09Z",
+      "reserveDelta": "0.13",
+      "refund": null
+    },
+    {
+      "orderId": "j_000041",
+      "jobType": "extract",
+      "price": "0.80",
+      "worker": "crab",
+      "payoutChain": "near",
+      "status": "delivered",
+      "referral": null,
+      "attestationUrl": "https://example.com/attestation/j_000041",
+      "workerPayoutTx": "SAMPLEtxP41",
+      "at": "2026-11-05T07:40:00Z",
+      "reserveDelta": null,
+      "refund": null
+    },
+    {
+      "orderId": "j_000040",
+      "jobType": "thread",
+      "price": "0.60",
+      "worker": "raven",
+      "payoutChain": "base",
+      "status": "refunded",
+      "referral": null,
+      "attestationUrl": "https://example.com/attestation/j_000040",
+      "workerPayoutTx": null,
+      "at": "2026-11-05T07:10:00Z",
+      "reserveDelta": null,
+      "refund": "0.60"
+    }
+  ],
+  "owners": {
+    "dao": "sharkco.sputnikv2.testnet",
+    "approvalRule": "1 of 1",
+    "openProposals": [
+      {
+        "id": 13,
+        "title": "set_config thread band 0.50 to 2.00 → 0.60 to 2.00"
+      }
+    ],
+    "proposals": [
+      {
+        "id": 14,
+        "title": "reinstate_worker raven",
+        "status": "passed",
+        "at": "2026-10-24T10:00:00Z",
+        "votes": "1 of 1"
+      },
+      {
+        "id": 13,
+        "title": "set_config thread band 0.50 to 2.00 → 0.60 to 2.00",
+        "status": "open",
+        "at": "2026-10-31T09:00:00Z",
+        "votes": "0 of 1"
+      },
+      {
+        "id": 12,
+        "title": "set_config bands, budget 4.00",
+        "status": "passed",
+        "at": "2026-10-23T09:00:00Z",
+        "votes": "1 of 1"
+      }
+    ],
+    "ownersWaiting": "6.00",
+    "trezuUrl": "https://trezu.example/dao/sharkco"
+  },
+  "guardian": {
+    "account": "guardian.sharkco.testnet",
+    "power": "pause only"
+  },
+  "config": {
+    "quoteTtlSecs": 600,
+    "workerCapBps": 5000,
+    "reviewFee": "0.05",
+    "referralBps": 750,
+    "ownerBps": 6000,
+    "dailyBudget": "4.00",
+    "reserveFloor": "12.10",
+    "strikeThreshold": 3,
+    "suspendThreshold": 3,
+    "suspendWindowJobs": 20,
+    "unresolvedTimeoutSecs": 604800,
+    "maxUnresolvedOpen": 2,
+    "complaintWindowSecs": 86400,
+    "bands": {
+      "extract": {
+        "min": "0.30",
+        "max": "1.50"
+      },
+      "summary": {
+        "min": "0.20",
+        "max": "1.00"
+      },
+      "thread": {
+        "min": "0.50",
+        "max": "2.00"
+      }
+    },
+    "changedAt": "2026-10-30T09:00:00Z",
+    "changedByProposal": 11,
+    "changeTx": "SAMPLEtxCfg"
+  },
+  "auctions": [
+    {
+      "orderId": "j_000045",
+      "jobType": "summary",
+      "price": "0.80",
+      "cap": "0.40",
+      "bids": [
+        {
+          "worker": "crab",
+          "price": "0.30",
+          "etaSecs": 0,
+          "state": "busy"
+        },
+        {
+          "worker": "raven",
+          "price": "0.24",
+          "etaSecs": 45,
+          "state": "winner"
+        }
+      ],
+      "winner": "raven",
+      "reason": "Raven disputed. Second review timed out. Refunded. Fee held.",
+      "outcome": "unresolved"
+    },
+    {
+      "orderId": "j_000044",
+      "jobType": "thread",
+      "price": "0.60",
+      "cap": "0.30",
+      "bids": [
+        {
+          "worker": "crab",
+          "price": "0.20",
+          "etaSecs": 60,
+          "state": "lost"
+        },
+        {
+          "worker": "raven",
+          "price": "0.19",
+          "etaSecs": 40,
+          "state": "winner"
+        }
+      ],
+      "winner": "raven",
+      "reason": "Raven: cheaper, and it disputed and won.",
+      "outcome": "dispute_won"
+    },
+    {
+      "orderId": "j_000042",
+      "jobType": "summary",
+      "price": "0.60",
+      "cap": "0.30",
+      "bids": [
+        {
+          "worker": "crab",
+          "price": "0.18",
+          "etaSecs": 70,
+          "state": "winner"
+        },
+        {
+          "worker": "raven",
+          "price": "0.24",
+          "etaSecs": 45,
+          "state": "lost"
+        }
+      ],
+      "winner": "crab",
+      "reason": "Crab: cheaper, 93% first pass.",
+      "outcome": "delivered"
+    },
+    {
+      "orderId": "j_000041",
+      "jobType": "extract",
+      "price": "0.80",
+      "cap": "0.40",
+      "bids": [
+        {
+          "worker": "crab",
+          "price": "0.30",
+          "etaSecs": 90,
+          "state": "winner"
+        },
+        {
+          "worker": "raven",
+          "price": "0.42",
+          "etaSecs": 50,
+          "state": "invalid"
+        }
+      ],
+      "winner": "crab",
+      "reason": "Raven over the 0.40 cap. Rejected.",
+      "outcome": "delivered"
+    },
+    {
+      "orderId": "j_000040",
+      "jobType": "thread",
+      "price": "0.60",
+      "cap": "0.30",
+      "bids": [
+        {
+          "worker": "crab",
+          "price": "0.17",
+          "etaSecs": 65,
+          "state": "lost"
+        },
+        {
+          "worker": "raven",
+          "price": "0.19",
+          "etaSecs": 45,
+          "state": "winner"
+        }
+      ],
+      "winner": "raven",
+      "reason": "Complaint upheld: brief said paragraph. Strike 1.",
+      "outcome": "complaint"
+    }
+  ],
+  "incidents": [
+    {
+      "at": "2026-11-05T07:10:00Z",
+      "orderId": "j_000040",
+      "kind": "complaint_upheld",
+      "text": "Asked for bullets, brief said paragraph. Refunded the customer. Strike 1 for Shark.",
+      "strike": true
+    },
+    {
+      "at": "2026-11-05T06:40:00Z",
+      "orderId": "j_000044",
+      "kind": "dispute_won",
+      "text": "Raven disputed Owl's M1 fail. Overturned by a different model. Raven paid.",
+      "strike": false
+    },
+    {
+      "at": "2026-11-04T22:00:00Z",
+      "orderId": "j_000027",
+      "kind": "late",
+      "text": "Crab late (95 s over 70 s). Job reauctioned to Raven. Crab unpaid.",
+      "strike": false
+    }
+  ],
+  "payouts": [
+    {
+      "at": "2026-10-24T10:25:00Z",
+      "orderId": "j_000045",
+      "to": "raven",
+      "kind": "held",
+      "amount": "0.18",
+      "chain": "base",
+      "tx": null,
+      "held": true
+    },
+    {
+      "at": "2026-10-24T10:06:00Z",
+      "orderId": "j_000042",
+      "to": "owl",
+      "kind": "reviewer",
+      "amount": "0.05",
+      "chain": "near",
+      "tx": "SAMPLEtx4kPa1",
+      "held": false
+    },
+    {
+      "at": "2026-10-24T10:06:00Z",
+      "orderId": "j_000042",
+      "to": "ref-agent.testnet",
+      "kind": "referral",
+      "amount": "0.045",
+      "chain": "near",
+      "tx": "SAMPLEtx4kPa2",
+      "held": false
+    },
+    {
+      "at": "2026-10-23T22:41:00Z",
+      "orderId": "j_000044",
+      "to": "raven",
+      "kind": "worker",
+      "amount": "0.20",
+      "chain": "base",
+      "tx": "0xSAMPLEbase1",
+      "held": false
+    },
+    {
+      "at": "2026-10-23T00:00:00Z",
+      "orderId": null,
+      "to": "sharkco.sputnikv2.testnet",
+      "kind": "owner",
+      "amount": "7.80",
+      "chain": "near",
+      "tx": "SAMPLEtxOwn1",
+      "held": false
+    }
+  ],
+  "sample": {
+    "strikes": true,
+    "reserve": true,
+    "pnl7d": true,
+    "prices": true,
+    "workers": true,
+    "reviewer": true,
+    "recentJobs": true,
+    "owners": true,
+    "config": true,
+    "auctions": true,
+    "incidents": true,
+    "payouts": true,
+    "guardian": true
+  }
+}

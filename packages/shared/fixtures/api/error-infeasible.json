@@ -1,0 +1,8 @@
+{
+  "error": "brief_infeasible",
+  "message": "150 words can't cover 9 required points. Reduce the points or raise the limit.",
+  "charged": false,
+  "details": {
+    "reason": "max_words_vs_must_mention"
+  }
+}
