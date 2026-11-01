@@ -1,0 +1,13 @@
+#!/bin/sh
+# .githooks/pre-commit: block commits before the hackathon start (RULES §3a, D-163) and scan staged files for secrets (RULES §3)
+CUTOFF=1793491200   # 2026-11-01T00:00:00Z
+NOW=$(date -u +%s)
+if [ "$NOW" -lt "$CUTOFF" ]; then
+  echo "Blocked: the repo history starts 2026-11-01 00:00 UTC (07:00 WIB). See D-163." >&2
+  exit 1
+fi
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "Blocked: gitleaks not found, so the secret scan can't run (RULES §3)." >&2
+  exit 1
+fi
+exec gitleaks git --pre-commit --staged --redact --no-banner

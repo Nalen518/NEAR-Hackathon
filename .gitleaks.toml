@@ -1,0 +1,10 @@
+# Default gitleaks rules, plus an allowlist for public on-chain ids that look like keys.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Circle USDC contract ids on NEAR testnet and mainnet (public, API-CONTRACT §0)"
+regexes = [
+  '''3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af''',
+  '''17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1''',
+]

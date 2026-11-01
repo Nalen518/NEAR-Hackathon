@@ -16,7 +16,7 @@ Tiers were agreed by the owner on 30 Oct: **Must** first, then **Should**, then 
 
 ## A. Before anything works live (Must)
 
-- [ ] **A1 · Serve `/v1/*` on testnet** with the API-CONTRACT v2.2 shapes and `network: "near:testnet"` on every response.
+- [ ] **A1 · Serve `/v1/*` on testnet** with the API-CONTRACT v2.3 shapes (D-172) and `network: "near:testnet"` on every response.
   - **Accept when:** `Prices`, `Company`, `Health`, `PaymentOptions` and `QuoteStatus` all parse.
   - **Watch out:** the web now **rejects any response whose `network` (or signed `quote.network`) isn't the selected one** (API §0.3 N1). A testnet host that answers `near:mainnet` anywhere shows a "Wrong network" banner and blocks payment.
 - [ ] **A2 · `POST /v1/orders` answers 402 or 202** (never 200 for the web) with the full `Quote402` body.
@@ -51,7 +51,7 @@ Tiers were agreed by the owner on 30 Oct: **Must** first, then **Should**, then 
 - [ ] **A11 · `GET /v1/payment-options` (testnet)** returns `quote` with `faucet.url` (Circle, or the fallback mock USDC faucet) and the `x402` option. Mainnet adds the `intents` routes.
 - [ ] **A12 · Testnet values for the web's env** (owner puts them in `.env.local`, never in the repo):
   - `NEXT_PUBLIC_TESTNET_API_URL`, `_CONTRACT_ID`, `_USDC_ID`, `_RPC_URL`
-  - `_USDC_FAUCET_URL`, `_WALLETS` (Wallet Selector module ids that work on testnet, O-28)
+  - `_USDC_FAUCET_URL`, `_WALLETS` (NEAR Connect wallet ids that support testnet, O-28; NEAR Connect replaces Wallet Selector, D-172)
   - Same names for mainnet later. The full list is in `apps/web/.env.example`.
 
 ## B. So the pages show real detail (Should)

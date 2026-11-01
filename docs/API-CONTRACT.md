@@ -4,7 +4,7 @@ The single source for every interface: the Shark HTTP API, the worker and review
 
 | Field | Value |
 | --- | --- |
-| Version | **2.3** (31 Oct: checked against docs.near.org, `near/agent-skills`, the x402 spec v2 and `@x402/near`; see §5.3) |
+| Version | **2.3** (31 Oct: checked against docs.near.org, `near/agent-skills`, the x402 spec v2 and `@x402/near`; see §5.3. 1 Nov: payer view and complaint shapes settled with the web, D-172. The additions P1 to P6 in `docs/web/API-CHANGE-PROPOSAL-v2.3.md` are part of this version) |
 | Deployments | One Shark host per deployment: **testnet** (methods 1 + 3) and **mainnet-lite** (methods 1 + 2 + 3). Method 1 = signed quote · 2 = NEAR Intents · 3 = x402 |
 
 ---
@@ -24,7 +24,7 @@ The single source for every interface: the Shark HTTP API, the worker and review
 | Idempotency | `POST /v1/orders` accepts `Idempotency-Key`; same key + body within 10 min → same response |
 | Sample data | Dashboard responses carry `"sample": { "<section>": bool }`; job responses carry one `"sample": bool` |
 | Canonical JSON | Keys sorted, no spaces, UTF-8 (used for hashes and signatures) |
-| CORS | Browser calls allowed only from the web origins (`https://<web-domain>`, `http://localhost:3000`): `GET, POST, OPTIONS`; headers `Content-Type, Idempotency-Key, PAYMENT-SIGNATURE`; exposed `WWW-Authenticate, Retry-After, PAYMENT-REQUIRED, PAYMENT-RESPONSE`. Agents call server-to-server |
+| CORS | Browser calls allowed only from the web origins (`https://<web-domain>`, `http://localhost:3100` (the web's dev port), `http://localhost:3000`): `GET, POST, OPTIONS`; headers `Content-Type, Idempotency-Key, PAYMENT-SIGNATURE`; exposed `WWW-Authenticate, Retry-After, PAYMENT-REQUIRED, PAYMENT-RESPONSE`. Agents call server-to-server |
 | Network names | CAIP-2 everywhere: `near:testnet`, `near:mainnet`; Base: `eip155:84532` (Sepolia), `eip155:8453`. NEAR Connect uses `network: "testnet" \| "mainnet"` |
 | Token | **Circle USDC on NEAR**: testnet `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`, mainnet `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` (per FastNEAR docs; **[VERIFY O-24]** with Circle) |
 | Gas | Every on-chain call a client makes is given with explicit `gas` and `deposit` |
@@ -53,6 +53,9 @@ The single source for every interface: the Shark HTTP API, the worker and review
 | 422 | `unsupported_payment_asset` / `amount_below_minimum` / `intents_unavailable` | Method-2 problems | no |
 | 402 | `x402_invalid` / `x402_settlement_failed` | `PAYMENT-SIGNATURE` malformed, `accepted` ≠ the stored requirement, wrong network, or the facilitator's verify/settle failed (`details.reason` = its `errorReason`) | no |
 | 401 | `payer_signature_invalid` | Missing, expired (> 5 min) or wrong NEP-413 signature on a payer-only call (§1.5a, §1.6) | no |
+| 403 | `not_payer` | Valid signature, but `accountId` is not the order's payer (§1.5a, §1.6) | no |
+| 404 | `order_not_found` | Unknown `orderId` | no |
+| 409 | `complaint_closed` | Complaint window over, or a complaint was already sent (§1.6) | no |
 | 429 | `rate_limited` | > 30 requests/min per IP, or > 3 complaints/day per payer (`Retry-After`) | no |
 | 502 | `upstream_unavailable` | NEAR AI, NEAR RPC, fetch or 1Click down before quoting | no |
 | 503 | `closed` · `paused` · `caged` · `no_worker` · `out_of_budget` | Service state, checked first in this order | no |
@@ -238,19 +241,19 @@ Base URL `https://<shark-host>/v1`. No authentication: payment is the authentica
 }
 ```
 **`status`:** `paid`, `awarded`, `review`, `revision`, `failed`, `dispute_review`, `unresolved`, `delivered`, `complaint_review`, `finalized`, `refund_due`, `refunded`, `needs_review`. Final: `finalized`, `refunded`.
-- `delivery` is `null` until a review passes; it stays hidden for `unresolved` and `refunded`.
+- `delivery` is `null` until a review passes; it stays `null` for `unresolved`, `refund_due` and `refunded`, in the payer view too.
 - `needs_review`: "A payment step is being checked by hand. Your money is safe: the job will finish or be refunded."
 - Refunds: `refund = { to: payer, amount, reason, tx }`.
 
 ### 1.5a `POST /v1/orders/{orderId}/view` — payer view (D-166)
-`GET /v1/orders/{id}` is public and returns the **public view**: `brief` reduced to `jobType` + check ids, `input`/`instructions` = `"private"`, `delivery` = `null`, no `complaint`. The payer proves ownership with a NEP-413 signed message and gets the **payer view** (the full §1.5 shape):
+`GET /v1/orders/{id}` is public and returns the **public view** (`view: "public"`): `brief` reduced to `jobType` + `checklist[].{id, kind}`; `instructions`, `input.source`, `brief.params` and `delivery` are **omitted**; `complaint` stays (window and status only); optional `size: { pages, words }`. The payer proves ownership with a NEP-413 signed message and gets the **payer view** (`view: "payer"`, the full §1.5 shape plus `instructions` and `input: { source, pages, words }`). The body is the flat `signMessage` output (D-172):
 ```json
-{ "auth": { "accountId": "demo-buyer.testnet", "publicKey": "ed25519:…", "signature": "…", "message": "sharkco:view:j_000042:1793521364", "nonce": "<base64 32 bytes>", "recipient": "<shark-host>" } }
+{ "accountId": "demo-buyer.testnet", "publicKey": "ed25519:…", "signature": "<base64>", "message": "sharkco:view:j_000042:1793521364", "nonce": "<base64 32 bytes>", "recipient": "sharkco.testnet" }
 ```
-Shark checks: the NEP-413 signature, `accountId` = the order's payer, the public key is a key of that account on **this network** (`view_access_key`), timestamp ≤ 5 min old. Response `200` = payer view with `Cache-Control: private, no-store`. Errors: `401 payer_signature_invalid`. *Recovered from the frontend brief v2.1 on 31 Oct; confirm the message format.*
+`recipient` = this network's company contract id. Shark checks: the NEP-413 signature, `recipient`, the public key is a key of that account on **this network** (`view_access_key`), timestamp ≤ 5 min old, nonce not used before, then `accountId` = the order's payer. Response `200` = payer view with `Cache-Control: private, no-store`. Errors: `401 payer_signature_invalid`, `403 not_payer`, `404 order_not_found`.
 
 ### 1.6 `POST /v1/orders/{orderId}/complaint`
-`{ "reason": "I asked for bullet points, the brief said paragraph.", "auth": { "…": "NEP-413, message sharkco:complain:<orderId>:<ts>" } }` (reason ≤ 1 000 chars), only from the payer, only while `complaint.allowedUntil` is in the future → `202 { "status": "complaint_review" }`. Errors: `401 payer_signature_invalid`, `409 complaint_closed`, `429 rate_limited`.
+`{ "reason": "I asked for bullet points, the brief said paragraph.", "auth": { "…": "§1.5a body, message sharkco:complain:<orderId>:<ts>" } }` (reason ≤ 1 000 chars), only from the payer, only while `complaint.allowedUntil` is in the future → `202 { "status": "complaint_review" }`. Errors: `401 payer_signature_invalid`, `403 not_payer`, `409 complaint_closed`, `429 rate_limited`.
 
 ### 1.7 `GET /v1/prices`
 ```json

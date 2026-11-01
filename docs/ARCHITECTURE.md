@@ -147,7 +147,7 @@ shark-co/
 └─ docs/
 ```
 
-## 9. Configuration (names only)
+## 9. Configuration (names only; where these differ from API-CONTRACT §5.1, §5.1 wins, D-172)
 
 | Variable | Used by |
 | --- | --- |
@@ -155,7 +155,7 @@ shark-co/
 | `SHARK_ACCOUNT_ID`, `SHARK_FN_KEY`, `SHARK_QUOTE_KEY`, `WEB_ORIGINS`, `FILE_STORE_PATH`, `PUBLIC_BASE_URL` | shark |
 | `OUTLAYER_API_URL`, `OUTLAYER_API_KEY` | shark |
 | `NEARAI_API_KEY`, `NEARAI_MODEL_SHARK` | shark |
-| `INTENTS_ENABLED`, `ONECLICK_URL`, `ONECLICK_JWT` | shark (mainnet) |
+| `INTENTS_ENABLED`, `ONECLICK_URL`, `ONECLICK_API_KEY` | shark (mainnet) |
 | `BASE_RPC_URL`, `BASE_CHAIN_ID` (84532 / 8453), `BASE_USDC_ADDRESS` | shark |
 | `RAVEN_ACCOUNT_ID`, `RAVEN_FN_KEY`, `RAVEN_BID_KEY`, `RAVEN_MODEL`, `RAVEN_BASE_ADDRESS` | raven |
 | `CRAB_ACCOUNT_ID`, `CRAB_FN_KEY`, `CRAB_BID_KEY`, `CRAB_MODEL` | crab |

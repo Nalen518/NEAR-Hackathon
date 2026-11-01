@@ -306,7 +306,7 @@ Every resource, endpoint and status is listed in **`API-CONTRACT.md` §5** (sing
 | NEAR AI Cloud | Briefs, pricing reasons, safety filter (Shark); the work (Raven, Crab); model checks (Owl) | both |
 | NEAR RPC | Views, access keys, transactions | both |
 | NEAR Intents 1Click | Method-2 payments | mainnet |
-| x402 on NEAR (`@fastnear/x402`) + facilitator | Method-3 payments for bots | both |
+| x402 on NEAR (`@x402/near`, our own facilitator) | Method-3 payments for bots | both |
 | Circle USDC on NEAR | All payments (testnet and mainnet contracts) | both |
 | OutLayer | Shark's custody wallet + policy; Owl's attested review compute | both |
 | Chain Signatures (MPC signer) | Raven payouts on Base / Base Sepolia | both |
