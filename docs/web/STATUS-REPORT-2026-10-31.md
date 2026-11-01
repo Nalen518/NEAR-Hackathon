@@ -20,7 +20,7 @@ The single register of gaps is **§3**. The backend checklist is `BACKEND-TODO.m
 ## 2. Not done yet (rechecked 31 Oct)
 
 **Frontend items still open, in suggested order:**
-1. Pixel comparison fixes D9 to D12 and D1 shader tuning (D1 height, D3 to D7 done)
+1. ~~Pixel comparison fixes~~ all done 1 Nov. Owner choice left: single column for the Company workers pane (see PIXEL-COMPARISON §4)
 2. F7 unused SVGs (kept, as you chose)
 3. W6 live run (waits for the backend)
 
@@ -28,7 +28,7 @@ The single register of gaps is **§3**. The backend checklist is `BACKEND-TODO.m
 ### 2.1 Checks the prompt asks for
 | Item | Why not | What it needs |
 | --- | --- | --- |
-| Pixel comparison with Figma | **Done 31 Oct**, see `PIXEL-COMPARISON-2026-10-31.md` | 12 differences: D1 (height), D3, D4, D5, D6 and D7 fixed. D9 to D12 and D1 shader tuning wait for your choice |
+| Pixel comparison with Figma | **Done 31 Oct**, see `PIXEL-COMPARISON-2026-10-31.md` | 12 differences: all fixes applied by 1 Nov (D1 incl. shader, D3 to D7, D9 to D12). What is left is data or design choice, listed in §4 there |
 | Real wallet (NEAR Wallet Selector, `signMessage`) | Waits for W6 and your go | Backend B1, then your yes |
 | W6 live testnet run | Backend not serving v2 yet | Backend B1 and B2, then your yes for each test payment |
 
