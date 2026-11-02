@@ -332,8 +332,7 @@ describe("A6: GET /v1/orders/{id} is the public view", () => {
   it("B6: an unknown job is 404 order_not_found", async () => {
     const res = await get("/v1/orders/j_000999");
     expect(res.status).toBe(404);
-    // reported schema bug: shared ERROR_CODES lacks order_not_found, so ApiError.parse rejects this body
-    expect(await res.json()).toMatchObject({ error: "order_not_found", charged: false });
+    expect(await parsed(ApiError, res)).toMatchObject({ error: "order_not_found", charged: false });
   });
 });
 
@@ -439,13 +438,10 @@ function tinyPdf(text: string): Uint8Array {
   );
 }
 
-describe("reported schema bugs (packages/shared, not changed here)", () => {
-  it("OrderRequest.parse strips thread params: SummaryParams matches first in the union", async () => {
-    const { OrderRequest } = await import("@shark/shared");
-    const r = OrderRequest.parse(order({ jobType: "thread", params: { posts: 7, mustInclude: ["#NEAR"] } }));
-    expect(r.params).toEqual({}); // the web sends this, so a real thread order loses posts and mustInclude
-  });
-  it("ApiError has no order_not_found, which B6 and API §0.2 require", async () => {
-    expect(ApiError.safeParse({ error: "order_not_found", message: "x", charged: false }).success).toBe(false);
+describe("params for the wrong job type", () => {
+  it("summary params on a thread order are a 400 on the instructions field", async () => {
+    const res = await post("/v1/orders", order({ jobType: "thread", input: undefined, params: { maxWords: 150 } }));
+    expect(res.status).toBe(400);
+    expect((await parsed(ApiError, res)).details?.field).toBe("instructions");
   });
 });

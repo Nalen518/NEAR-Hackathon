@@ -3,13 +3,10 @@ import type { ErrorCode } from "@shark/shared";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
-/** API §0.2. "order_not_found" is in the contract (D-172) but missing from the shared ERROR_CODES (reported schema bug). */
-export type Code = ErrorCode | "order_not_found";
-
 export class HttpError extends Error {
   constructor(
     readonly status: ContentfulStatusCode,
-    readonly code: Code,
+    readonly code: ErrorCode,
     message: string,
     readonly details?: Record<string, unknown>,
     readonly retryAfter?: number,

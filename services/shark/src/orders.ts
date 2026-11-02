@@ -94,8 +94,7 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
       const key = String(parsed.error.issues[0]?.path[0] ?? "instructions");
       throw badField(FIELD_OF[key] ?? key, "Check this field and send the order again.");
     }
-    // OrderRequest.params is a union whose all-optional SummaryParams matches first and strips thread and extract
-    // fields (reported schema bug), so params are checked against the schema of the job type instead
+    // the shared union accepts any job type's params, so check them against this job type's schema
     const PARAMS = { extract: ExtractParams, summary: SummaryParams, thread: ThreadParams };
     const params = PARAMS[parsed.data.jobType].safeParse((body as { params?: unknown }).params ?? {});
     if (!params.success) throw badField("instructions", "Check the options for this job type and send the order again.");

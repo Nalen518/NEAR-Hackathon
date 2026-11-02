@@ -146,7 +146,7 @@ export function JobView({ orderId }: { orderId: string }) {
             </p>
           </StateCard>
         ) : err ? (
-          <StateCard title={err instanceof SharkApiError && err.status === 400 ? "No such job" : "Can’t reach Shark right now"} chip={err instanceof SharkApiError ? String(err.status) : "offline"} money="unchanged, held by the contract">
+          <StateCard title={err instanceof SharkApiError && (err.status === 404 || err.status === 400) ? "No such job" : "Can’t reach Shark right now"} chip={err instanceof SharkApiError ? String(err.status) : "offline"} money="unchanged, held by the contract">
             <div className="flex items-center gap-4">
               <Mascot name="shark" size={56} />
               <p className="body-small text-muted">The job page couldn’t load. Your money is safe in the contract. We retry every 5 s.</p>

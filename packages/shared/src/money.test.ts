@@ -54,6 +54,18 @@ describe("OrderRequest (FR-01)", () => {
     expect(OrderRequest.safeParse({ ...ok, instructions: "x".repeat(2001) }).success).toBe(false);
     expect(OrderRequest.safeParse({ ...ok, jobType: "image" }).success).toBe(false);
   });
+
+  it("keeps every job type's params (summary params used to strip thread params)", async () => {
+    const { OrderRequest } = await import("./schemas");
+    const base = { instructions: "Do the job.", payer: "demo-buyer.testnet" };
+    const thread = { posts: 5, mustInclude: ["#NEAR"], tone: "friendly", topic: "launch" };
+    expect(OrderRequest.parse({ ...base, jobType: "thread", params: thread }).params).toEqual(thread);
+    const summary = { maxWords: 150, mustMention: ["fees"], language: "en", format: "bullets" };
+    expect(OrderRequest.parse({ ...base, jobType: "summary", params: summary }).params).toEqual(summary);
+    const extract = { schema: { fields: [{ name: "price", type: "number", required: true }] }, many: true, maxRecords: 10 };
+    expect(OrderRequest.parse({ ...base, jobType: "extract", params: extract }).params).toEqual(extract);
+    expect(OrderRequest.safeParse({ ...base, jobType: "summary", params: { maxWord: 150 } }).success).toBe(false);
+  });
 });
 
 describe("v2 Company shapes", () => {

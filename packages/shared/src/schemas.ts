@@ -40,6 +40,7 @@ export const ERROR_CODES = [
   "x402_settlement_failed",
   "payer_signature_invalid",
   "not_payer",
+  "order_not_found",
   "complaint_closed",
   "rate_limited",
   "upstream_unavailable",
@@ -84,19 +85,20 @@ export const ExtractParams = z.object({
   }),
   many: z.boolean().optional(),
   maxRecords: z.number().int().min(1).max(200).optional(),
-});
+}).strict();
 export const SummaryParams = z.object({
   maxWords: z.number().int().min(30).max(500).optional(),
   mustMention: z.array(z.string()).max(5).optional(),
   language: z.string().optional(),
   format: z.enum(["paragraph", "bullets"]).optional(),
-});
+}).strict();
 export const ThreadParams = z.object({
   posts: z.number().int().min(2).max(10).optional(),
   mustInclude: z.array(z.string()).max(5).optional(),
   tone: z.enum(["neutral", "friendly", "bold"]).optional(),
   topic: z.string().optional(),
-});
+}).strict();
+// Strict, so the all optional SummaryParams no longer swallows (and strips) thread params; the three share no keys
 export const Params = z.union([ExtractParams, SummaryParams, ThreadParams]);
 
 // §1.1
