@@ -23,6 +23,11 @@ export type Config = {
   /** Agent accounts → the names the web shows (API §5.1 `<NET>_*_ID`). */
   agents: { crab: string | null; raven: string | null; owl: string | null };
   trezuUrl: string | null;
+  /** Worker RFQ endpoints by account (API §2.1). */
+  workerUrls: Record<string, string>;
+  /** Shark's USDC wallet for escrow and keepers (FR-34). shortcut: a testnet account key until the OutLayer wallet */
+  walletId: string | null;
+  walletKey: string | null;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -51,5 +56,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     rateLimitPerMin: Number(env.RATE_LIMIT_PER_MIN ?? 30),
     agents: { crab: env[`${NET}_CRAB_ID`] || null, raven: env[`${NET}_RAVEN_ID`] || null, owl: env[`${NET}_OWL_ID`] || null },
     trezuUrl: env[`${NET}_TREZU_URL`] || null,
+    workerUrls: Object.fromEntries(
+      (["CRAB", "RAVEN"] as const).flatMap((w) => (env[`${NET}_${w}_ID`] && env[`${NET}_${w}_URL`] ? [[env[`${NET}_${w}_ID`]!, env[`${NET}_${w}_URL`]!]] : [])),
+    ),
+    walletId: env[`${NET}_SHARK_WALLET_ID`] || null,
+    walletKey: env.SHARK_WALLET_KEY || null,
   };
 }

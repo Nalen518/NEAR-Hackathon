@@ -48,7 +48,12 @@ function parseOrderId(raw: string): number {
 
 export function orderRoutes(app: Hono, d: OrderDeps) {
   const { config, chain, store, now } = d;
-  const ctx: ViewCtx = { networkId: config.networkId, blob: store.blob };
+  const ctx: ViewCtx = {
+    networkId: config.networkId,
+    blob: store.blob,
+    auction: store.auction,
+    idOf: (account) => (account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : null),
+  };
 
   async function serviceCheck(jobType: string) {
     const state = await chain.serviceState();
@@ -268,7 +273,7 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
 }
 
 const PASSED: ContractJob["state"][] = ["delivered", "complaint_review", "finalized"];
-type ViewCtx = { networkId: Config["networkId"]; blob: Store["blob"] };
+type ViewCtx = { networkId: Config["networkId"]; blob: Store["blob"]; auction: Store["auction"]; idOf: (account: string | null) => "crab" | "raven" | null };
 
 /** Contract job + Shark's quote record → the §1.5 shape. The public view never carries private fields (D-166). */
 function orderView(job: ContractJob, row: QuoteRow | undefined, view: "public", ctx: ViewCtx): OrderPublic;
@@ -281,7 +286,9 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
 
   const timeline: Order["timeline"] = [{ at: iso(job.paid_at), event: "paid" }];
   // shortcut: only the latest award, delivery and review times are on chain; the full event history comes from NEP-297 events (B1)
-  if (job.awarded_at) timeline.push({ at: iso(job.awarded_at), event: "awarded" });
+  const auction = ctx.auction(job.id);
+  const worker = ctx.idOf(job.worker);
+  if (job.awarded_at) timeline.push({ at: iso(job.awarded_at), event: "awarded", ...(worker ? { worker } : {}), tx: auction?.award_tx ?? null });
   if (job.delivered_at) timeline.push({ at: iso(job.delivered_at), event: "delivered_for_review", round: job.round });
   if (job.reviewed_at) {
     if (job.state === "revision") timeline.push({ at: iso(job.reviewed_at), event: "review_fail", round: 1 }, { at: iso(job.reviewed_at), event: "revision_requested", round: 2 });
@@ -317,8 +324,17 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
     briefHash: job.brief_hash,
     inputHash: job.input_hash,
     timeline,
-    // shortcut: the auction record and Owl's reasons text arrive with the auction and Owl slices
-    auction: null,
+    auction: auction
+      ? {
+          cap: usdc(auction.cap),
+          bids: auction.bids.flatMap((b) => {
+            const id = ctx.idOf(b.account);
+            return id ? [{ worker: id, price: b.price === "0" ? "0.00" : b.price, etaSecs: b.etaSecs, state: b.state }] : [];
+          }),
+          reason: auction.reason,
+          reasonHash: auction.reason_hash,
+        }
+      : null,
     reviews: job.reviewed_at
       ? [{ round: job.round, mode: "primary" as const, pass: passed, codes, reasons: passed ? "All checks passed." : "The delivery did not pass review.", attestationUrl: null }]
       : [],
@@ -329,7 +345,7 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
         job.state === "complaint_review" ? ("complaint_review" as const) : job.complaint_hash ? (refunding ? ("upheld" as const) : ("rejected" as const)) : null,
     },
     refund: refunding ? { to: job.payer, amount: usdc(price), reason: refundReason, tx: null } : null,
-    proof: { paymentTx: null, awardTx: null, workerPayoutTx: null, contractTxs: [] },
+    proof: { paymentTx: null, awardTx: auction?.award_tx ?? null, workerPayoutTx: null, contractTxs: [auction?.award_tx, auction?.escrow_tx].filter((t): t is string => !!t) },
     sample: false,
   };
   if (view === "public")

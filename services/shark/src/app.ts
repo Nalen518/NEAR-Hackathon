@@ -2,6 +2,7 @@
 import type { PaymentOptions } from "@shark/shared";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { agentRoutes } from "./agents";
 import type { Chain } from "./chain";
 import { companyOf, pricesOf } from "./company";
 import type { Config } from "./config";
@@ -64,6 +65,7 @@ export function createApp({ config, chain, store, now = () => Math.floor(Date.no
   });
 
   orderRoutes(app, { config, chain, store, now, fetchImpl });
+  agentRoutes(app, { config, chain, store, now });
 
   return app;
 }

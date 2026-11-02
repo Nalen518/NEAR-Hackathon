@@ -4,12 +4,14 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiError, Company, ComplaintAccepted, Health, Order, OrderAccepted, OrderPayer, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult } from "@shark/shared";
-import { KeyPair, KeyPairSigner } from "near-api-js";
+import { baseEncode, KeyPair, KeyPairSigner } from "near-api-js";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { createApp } from "../src/app";
 import { verifyNep413, type Chain, type ContractConfig, type ContractJob, type Nep413 } from "../src/chain";
 import { loadConfig } from "../src/config";
+import { agentMessage } from "../src/agents";
+import { bidDigest, tick } from "../src/loop";
 import { openStore } from "../src/store";
 
 const USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
@@ -17,6 +19,9 @@ const NOW = 1_793_500_000;
 const quoteKey = KeyPair.fromRandom("ed25519");
 const buyerKey = KeyPair.fromRandom("ed25519");
 const strangerKey = KeyPair.fromRandom("ed25519");
+const crabKey = KeyPair.fromRandom("ed25519");
+const ravenKey = KeyPair.fromRandom("ed25519");
+const owlKey = KeyPair.fromRandom("ed25519");
 
 const config = loadConfig({
   SHARK_NETWORK: "testnet",
@@ -30,6 +35,8 @@ const config = loadConfig({
   TESTNET_CRAB_ID: "crab-worker.testnet",
   TESTNET_RAVEN_ID: "raven-worker.testnet",
   TESTNET_OWL_ID: "owl-reviewer.testnet",
+  TESTNET_CRAB_URL: "http://crab.local",
+  TESTNET_RAVEN_URL: "http://raven.local",
 });
 
 // SRD §8.7 testnet numbers
@@ -53,11 +60,15 @@ const floors = { extract: "200000", summary: "120000", thread: "240000" };
 const accessKeys = new Map([
   ["demo-buyer.testnet", buyerKey.getPublicKey().toString()],
   ["stranger.testnet", strangerKey.getPublicKey().toString()],
+  ["crab-worker.testnet", crabKey.getPublicKey().toString()],
+  ["raven-worker.testnet", ravenKey.getPublicKey().toString()],
+  ["owl-reviewer.testnet", owlKey.getPublicKey().toString()],
 ]);
 
 let jobs: Map<number, ContractJob>;
 let paidQuotes: Map<string, number>;
 let complaints: { job: number; hash: string }[];
+let txs: string[];
 
 const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   serviceState: async () => "ok",
@@ -86,6 +97,12 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   complain: async (job, hash) => {
     complaints.push({ job, hash });
   },
+  isAccessKey: async (account, key) => accessKeys.get(account) === key,
+  award: async (job, worker, fee) => (txs.push(`award ${job} ${worker} ${fee}`), "TxAward"),
+  escrow: async (job, amount) => (txs.push(`escrow ${job} ${amount}`), "TxEscrow"),
+  markRefundDue: async (job) => (txs.push(`refund_due ${job}`), "TxRefundDue"),
+  finalize: async (job) => (txs.push(`finalize ${job}`), "TxFinalize"),
+  payRefund: async (job) => (txs.push(`pay_refund ${job}`), "TxPayRefund"),
   ...over,
 });
 
@@ -97,6 +114,7 @@ beforeEach(() => {
   jobs = new Map();
   paidQuotes = new Map();
   complaints = [];
+  txs = [];
   store = openStore(mkdtempSync(join(tmpdir(), "shark-")));
   app = makeApp();
 });
@@ -140,6 +158,7 @@ function job(id: number, over: Partial<ContractJob> = {}): ContractJob {
     escrowed: false,
     round: 1,
     delivery_hash: "sha256:d",
+    work_deadline: NOW + 100,
     awarded_at: NOW - 580,
     delivered_at: NOW - 500,
     reviewed_at: NOW - 450,
@@ -473,5 +492,132 @@ describe("params for the wrong job type", () => {
     const res = await post("/v1/orders", order({ jobType: "thread", input: undefined, params: { maxWords: 150 } }));
     expect(res.status).toBe(400);
     expect((await parsed(ApiError, res)).details?.field).toBe("instructions");
+  });
+});
+
+type Bidder = { key: KeyPair; account: string; price: string; eta: number; expiry?: string; status?: number; signAs?: KeyPair };
+function bidFrom(b: Bidder, jobId: string) {
+  const expiry = b.expiry ?? new Date((NOW + 60) * 1000).toISOString();
+  const digest = bidDigest({ workerId: b.account, jobId, etaSecs: b.eta }, BigInt(Math.round(Number(b.price) * 1e6)), Math.floor(Date.parse(expiry) / 1000));
+  return { workerId: b.account, jobId, price: b.price, etaSecs: b.eta, expiry, pubKey: b.key.getPublicKey().toString(), sig: `ed25519:${baseEncode((b.signAs ?? b.key).sign(digest).signature)}` };
+}
+function workersFetch(bidders: Record<string, Bidder>, calls: { url: string; body: unknown }[]) {
+  return (async (url: string | URL, init?: RequestInit) => {
+    const u = String(url);
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    calls.push({ url: u, body });
+    const b = Object.entries(bidders).find(([host]) => u.startsWith(host))?.[1];
+    if (u.endsWith("/rfq")) {
+      if (!b || b.status === 204) return new Response(null, { status: 204 });
+      return Response.json(bidFrom(b, body.jobId));
+    }
+    return Response.json({ accepted: true });
+  }) as typeof fetch;
+}
+const loopDeps = (bidders: Record<string, Bidder>, calls: { url: string; body: unknown }[] = [], chain = fakeChain()) => ({ config, chain, store, now: () => NOW, fetchImpl: workersFetch(bidders, calls), log: () => {} });
+const unawarded: Partial<ContractJob> = { state: "paid", worker: null, worker_fee: "0", awarded_at: null, work_deadline: 0, codes: [], reviewed_at: null, delivered_at: null };
+const crab = { key: crabKey, account: "crab-worker.testnet", price: "0.18", eta: 70 };
+const raven = { key: ravenKey, account: "raven-worker.testnet", price: "0.24", eta: 45 };
+
+describe("job loop: auction (FR-30 to FR-33)", () => {
+  it("sends the RFQ, checks signed bids and awards the best one with a reason", async () => {
+    job(1, unawarded);
+    const calls: { url: string; body: unknown }[] = [];
+    await tick(loopDeps({ "http://crab.local": crab, "http://raven.local": raven }, calls));
+    expect(calls.map((c) => c.url).sort()).toEqual(["http://crab.local/rfq", "http://raven.local/rfq"]);
+    expect(calls[0].body).toMatchObject({ jobId: "j_000001", jobType: "summary", cap: "0.30", briefHash: "sha256:b" });
+    expect(txs).toEqual(["award 1 crab-worker.testnet 180000"]);
+    const row = store.auction(1)!;
+    expect(row.bids.map((b) => [b.account, b.state])).toEqual([["crab-worker.testnet", "winner"], ["raven-worker.testnet", "lost"]]);
+    expect(row.reason).toBe("Crab wins at 0.18 with a 75% first pass rate, done in about 70 s.");
+    expect(row.reason).not.toMatch(/[;—–]|\w-\w/); // D-170
+  });
+  it("throws out over cap, forged, expired and foreign key bids", async () => {
+    job(1, unawarded);
+    await tick(loopDeps({ "http://crab.local": { ...crab, price: "0.31" }, "http://raven.local": { ...raven, signAs: strangerKey } }));
+    expect(store.auction(1)!.bids.map((b) => b.state)).toEqual(["invalid", "invalid"]);
+    expect(txs).toEqual(["refund_due 1"]); // no valid bid: refund
+    job(2, unawarded);
+    await tick(loopDeps({ "http://crab.local": { ...crab, expiry: new Date((NOW - 1) * 1000).toISOString() }, "http://raven.local": { ...raven, key: strangerKey } }));
+    expect(store.auction(2)!.bids.map((b) => b.state)).toEqual(["invalid", "invalid"]);
+  });
+  it("204 is busy", async () => {
+    job(1, unawarded);
+    await tick(loopDeps({ "http://crab.local": crab, "http://raven.local": { ...raven, status: 204 } }));
+    expect(store.auction(1)!.bids.map((b) => b.state)).toEqual(["winner", "busy"]);
+  });
+});
+
+describe("job loop: after the award", () => {
+  async function awarded() {
+    job(1, unawarded);
+    await tick(loopDeps({ "http://crab.local": crab }));
+    txs = [];
+    return job(1, { state: "awarded", escrowed: false, awarded_at: NOW - 10, work_deadline: NOW + 590, codes: [], reviewed_at: null, delivered_at: null });
+  }
+  it("escrows fee plus review fee, then tells the worker once", async () => {
+    await awarded();
+    const calls: { url: string; body: unknown }[] = [];
+    await tick(loopDeps({ "http://crab.local": crab }, calls));
+    expect(txs).toEqual(["escrow 1 230000"]);
+    job(1, { ...jobs.get(1)!, escrowed: true });
+    await tick(loopDeps({ "http://crab.local": crab }, calls));
+    await tick(loopDeps({ "http://crab.local": crab }, calls));
+    expect(calls.filter((c) => c.url.endsWith("/award")).map((c) => c.body)).toEqual([{ jobId: "j_000001", price: "0.18", awardTx: "TxAward", round: 1 }]);
+    expect(txs).toEqual(["escrow 1 230000"]);
+  });
+  it("a revision is sent once as round 2 with the codes", async () => {
+    await awarded();
+    store.putAuction({ ...store.auction(1)!, round_sent: 1, escrow_tx: "TxEscrow" });
+    job(1, { ...jobs.get(1)!, state: "revision", escrowed: true, round: 2, codes: ["FAIL_LENGTH"] });
+    const calls: { url: string; body: unknown }[] = [];
+    await tick(loopDeps({ "http://crab.local": crab }, calls));
+    await tick(loopDeps({ "http://crab.local": crab }, calls));
+    expect(calls.map((c) => c.body)).toEqual([{ jobId: "j_000001", price: "0.18", awardTx: "TxAward", round: 2, codes: ["FAIL_LENGTH"] }]);
+  });
+  it("late work goes to refund due", async () => {
+    await awarded();
+    job(1, { ...jobs.get(1)!, escrowed: true, work_deadline: NOW - 61 });
+    await tick(loopDeps({}));
+    expect(txs).toEqual(["refund_due 1"]);
+  });
+  it("finalizes after the complaint window and pays due refunds", async () => {
+    job(1, { state: "delivered", complaint_until: NOW - 1 });
+    job(2, { state: "delivered", complaint_until: NOW + 10 });
+    job(3, { state: "refund_due" });
+    await tick(loopDeps({}));
+    expect(txs).toEqual(["finalize 1", "pay_refund 3"]);
+  });
+  it("the job page shows the auction and the award tx", async () => {
+    await awarded();
+    const o = await parsed(Order, await get("/v1/orders/j_000001"));
+    expect(o.auction).toMatchObject({ cap: "0.30", bids: [{ worker: "crab", price: "0.18", etaSecs: 70, state: "winner" }, { worker: "raven", state: "busy" }], reason: expect.stringContaining("Crab wins") });
+    expect(o.proof.awardTx).toBe("TxAward");
+    expect(o.timeline.find((e) => e.event === "awarded")).toMatchObject({ worker: "crab", tx: "TxAward" });
+  });
+});
+
+describe("files for agents (API 1.11)", () => {
+  const signedReq = (method: string, path: string, body: string, key: KeyPair, account: string, ts = NOW) => {
+    const sig = key.sign(new TextEncoder().encode(agentMessage(method, path, ts, body))).signature;
+    return app.request(path, {
+      method,
+      body: method === "GET" ? undefined : body,
+      headers: { "X-Agent-Account": account, "X-Agent-Key": key.getPublicKey().toString(), "X-Agent-Ts": String(ts), "X-Agent-Sig": Buffer.from(sig).toString("base64") },
+    });
+  };
+  it("a worker uploads a delivery and Owl reads it back by hash", async () => {
+    const put = await signedReq("PUT", "/v1/files", "My delivery", crabKey, "crab-worker.testnet");
+    const { hash } = await put.json();
+    expect(hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const got = await signedReq("GET", `/v1/files/${hash}`, "", owlKey, "owl-reviewer.testnet");
+    expect(await got.text()).toBe("My delivery");
+  });
+  it("refuses strangers, forged and stale signatures", async () => {
+    store.putBlob("sha256:x", "secret");
+    expect((await app.request("/v1/files/sha256:x")).status).toBe(401);
+    expect((await signedReq("GET", "/v1/files/sha256:x", "", strangerKey, "stranger.testnet")).status).toBe(401);
+    expect((await signedReq("GET", "/v1/files/sha256:x", "", strangerKey, "owl-reviewer.testnet")).status).toBe(401);
+    expect((await signedReq("GET", "/v1/files/sha256:x", "", owlKey, "owl-reviewer.testnet", NOW - 301)).status).toBe(401);
   });
 });

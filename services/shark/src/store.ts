@@ -22,6 +22,22 @@ export type QuoteRow = {
 
 export type FileRow = { id: string; hash: string; bytes: number; pages: number; words: number };
 
+export type BidRow = { account: string; price: string; etaSecs: number; state: "winner" | "lost" | "busy" | "late" | "invalid" };
+/** One auction per job (FR-30 to FR-34). Tx hashes are kept so the job page can link them. */
+export type AuctionRow = {
+  job_id: number;
+  cap: string;
+  bids: BidRow[];
+  winner: string | null;
+  reason: string;
+  reason_hash: string;
+  bid_hash: string | null;
+  award_tx: string | null;
+  escrow_tx: string | null;
+  round_sent: number;
+  at: number;
+};
+
 export function openStore(dir: string) {
   mkdirSync(join(dir, "files"), { recursive: true });
   const db = new DatabaseSync(join(dir, "shark.db"));
@@ -32,6 +48,7 @@ export function openStore(dir: string) {
     create table if not exists files (id text primary key, hash text, bytes int, pages int, words int);
     create table if not exists nonces (nonce text primary key, at int);
     create table if not exists complaints (payer text, at int);
+    create table if not exists auctions (job_id int primary key, row text);
   `);
   const blob = (hash: string) => join(dir, "files", hash.replace(/^sha256:/, ""));
   return {
@@ -65,6 +82,11 @@ export function openStore(dir: string) {
     complaintsSince: (payer: string, since: number) =>
       (db.prepare("select count(*) as n from complaints where payer = ? and at >= ?").get(payer, since) as { n: number }).n,
     addComplaint: (payer: string, at: number) => db.prepare("insert into complaints values (?, ?)").run(payer, at),
+    putAuction: (a: AuctionRow) => db.prepare("insert or replace into auctions values (?, ?)").run(a.job_id, JSON.stringify(a)),
+    auction: (jobId: number): AuctionRow | undefined => {
+      const r = db.prepare("select row from auctions where job_id = ?").get(jobId) as { row: string } | undefined;
+      return r && JSON.parse(r.row);
+    },
   };
 }
 

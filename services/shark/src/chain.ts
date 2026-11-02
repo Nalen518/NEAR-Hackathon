@@ -40,6 +40,8 @@ export type ContractJob = {
   escrowed: boolean;
   round: number;
   delivery_hash: string | null;
+  /** unix seconds; 0 until awarded */
+  work_deadline: number;
   awarded_at: number | null;
   delivered_at: number | null;
   reviewed_at: number | null;
@@ -78,16 +80,44 @@ export type Chain = {
   /** Signature valid and `publicKey` is a full-access key of `accountId` on this network. */
   verifyNep413(m: Nep413): Promise<boolean>;
   complain(job: number, reasonHash: string): Promise<void>;
+  /** Is `publicKey` an access key of `accountId` on this network (any permission)? */
+  isAccessKey(accountId: string, publicKey: string): Promise<boolean>;
+  // transactions; each returns its tx hash
+  award(job: number, worker: string, fee: string, bidHash: string, reasonHash: string): Promise<string>;
+  /** Shark's wallet sends worker fee + review fee to the contract (`escrow:<job>`, FR-34). */
+  escrow(job: number, amount: string): Promise<string>;
+  markRefundDue(job: number): Promise<string>;
+  finalize(job: number): Promise<string>;
+  payRefund(job: number): Promise<string>;
 };
 
-export function rpcChain(opts: { rpcUrl: string; contractId: string; usdcId: string; sharkId?: string; sharkKey?: string }): Chain {
+export type ChainOpts = {
+  rpcUrl: string;
+  contractId: string;
+  usdcId: string;
+  /** Shark's function-call key: award, complain, mark_refund_due (NFR-04). */
+  sharkId?: string;
+  sharkKey?: string;
+  /** Shark's USDC wallet: escrow, and the permissionless keepers. shortcut: a plain testnet account until the OutLayer custody wallet (D-144) */
+  walletId?: string;
+  walletKey?: string;
+};
+
+const TGAS = 1_000_000_000_000n;
+const txHash = (r: unknown) => (r as { transaction_outcome: { id: string } }).transaction_outcome.id;
+
+export function rpcChain(opts: ChainOpts): Chain {
   const provider = new JsonRpcProvider({ url: opts.rpcUrl });
   const view = <T>(method: string, args: Record<string, unknown> = {}, contractId = opts.contractId) =>
     provider.callFunction({ contractId, method, args, blockQuery: { finality: "final" } }) as Promise<T>;
-  const shark = () => {
-    if (!opts.sharkId || !opts.sharkKey) throw new Error("Shark's account and key are not configured");
-    return new Account(opts.sharkId, provider, KeyPairSigner.fromSecretKey(opts.sharkKey as KeyPairString));
+  const signer = (id?: string, key?: string) => {
+    if (!id || !key) throw new Error("this call needs an account and key that are not configured");
+    return new Account(id, provider, KeyPairSigner.fromSecretKey(key as KeyPairString));
   };
+  const shark = () => signer(opts.sharkId, opts.sharkKey);
+  const wallet = () => signer(opts.walletId, opts.walletKey);
+  const call = async (who: Account, methodName: string, args: Record<string, unknown>, gas = 30n * TGAS, deposit = 0n, contractId = opts.contractId) =>
+    txHash(await who.callFunctionRaw({ contractId, methodName, args, gas, deposit, waitUntil: "FINAL" }));
   return {
     serviceState: () => view<ChainState>("get_service_state"),
     config: () => view<ContractConfig>("get_config"),
@@ -111,8 +141,19 @@ export function rpcChain(opts: { rpcUrl: string; contractId: string; usdcId: str
     usdcRegistered: (id) => view<unknown>("storage_balance_of", { account_id: id }, opts.usdcId).then((b) => b !== null),
     verifyNep413: (m) => verifyNep413(m, provider),
     complain: async (job, reasonHash) => {
-      await shark().callFunction({ contractId: opts.contractId, methodName: "complain", args: { job, reason_hash: reasonHash }, gas: 30_000_000_000_000n });
+      await call(shark(), "complain", { job, reason_hash: reasonHash });
     },
+    isAccessKey: (accountId, publicKey) =>
+      provider.viewAccessKey({ accountId, publicKey, finalityQuery: { finality: "final" } }).then(
+        () => true,
+        () => false,
+      ),
+    award: (job, worker, fee, bidHash, reasonHash) => call(shark(), "award", { job, worker, fee, bid_hash: bidHash, reason_hash: reasonHash }),
+    escrow: (job, amount) =>
+      call(wallet(), "ft_transfer_call", { receiver_id: opts.contractId, amount, msg: `escrow:${job}` }, 100n * TGAS, 1n, opts.usdcId),
+    markRefundDue: (job) => call(shark(), "mark_refund_due", { job }),
+    finalize: (job) => call(wallet(), "finalize", { job }, 100n * TGAS),
+    payRefund: (job) => call(wallet(), "pay_refund", { job }, 100n * TGAS),
   };
 }
 
