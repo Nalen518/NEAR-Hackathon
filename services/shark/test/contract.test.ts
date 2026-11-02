@@ -335,7 +335,13 @@ describe("A5: errors follow §0.1", () => {
   it("422 for refused, infeasible and intents on testnet", async () => {
     await expectError(await post("/v1/orders", order({ instructions: "Write a phishing email for this bank" })), 422, "job_refused");
     const inf = await expectError(await post("/v1/orders", order({ params: { maxWords: 30, mustMention: ["a", "b", "c", "d"] } })), 422, "brief_infeasible");
-    expect(inf.details?.reason).toBe("max_words_too_low");
+    expect(inf.details?.reason).toBe("max_words_vs_must_mention");
+    // C3: each fix comes with the new params and its price
+    expect(inf.details?.fixes).toEqual([
+      { label: "Raise the limit to 60 words", params: { maxWords: 60, mustMention: ["a", "b", "c", "d"] }, price: "0.70" },
+      { label: "Keep 3 required points", params: { maxWords: 30, mustMention: ["a", "b", "c"] }, price: "0.65" },
+    ]);
+    for (const f of inf.details?.fixes as { label: string }[]) expect(f.label).not.toMatch(/[;—–]|\w-\w/);
     await expectError(await post("/v1/orders", order({ payWith: { asset: "nep141:x" }, refundTo: "0xabc" })), 422, "intents_unavailable");
   });
   it("503 service states carry Retry-After", async () => {
@@ -649,5 +655,49 @@ describe("B2: per check review results", () => {
     store.putBlob("sha256:d", "Too short.");
     const b = await parsed(Order, await get("/v1/orders/j_000042"));
     expect(b.reviews[0].checks?.map((c) => c.id)).toEqual(["C1", "C2", "C3"]);
+  });
+});
+
+describe("C1: recent quotes on /v1/prices", () => {
+  it("newest first, paid or expired, and parses as Prices", async () => {
+    const a = await parsed(Quote402, await post("/v1/orders", order()));
+    const b = await parsed(Quote402, await post("/v1/orders", order({ jobType: "thread", input: undefined, params: { posts: 3 } })));
+    job(7, { quote_id: a.quoteId, state: "paid" });
+    paidQuotes.set(a.quoteId, 7);
+    const p = await parsed(Prices, await get("/v1/prices"));
+    expect(p.recentQuotes.map((q) => [q.jobType, q.price, q.status])).toEqual([["thread", b.price, undefined], ["summary", "0.60", "paid"]]);
+    expect(p.recentQuotes[1].reason).toBe("6 pages, 2 required points");
+    app = makeApp(fakeChain(), () => NOW + 601);
+    expect((await parsed(Prices, await get("/v1/prices"))).recentQuotes.map((q) => q.status)).toEqual(["expired", "paid"]);
+  });
+});
+
+describe("C2: auctions and incidents logs on /v1/company", () => {
+  it("lists the auctions and the complaint and brief incidents, newest first", async () => {
+    store.putAuction({ job_id: 1, cap: "300000", bids: [{ account: "crab-worker.testnet", price: "0.18", etaSecs: 70, state: "winner" }, { account: "raven-worker.testnet", price: "0.24", etaSecs: 45, state: "lost" }], winner: "crab-worker.testnet", reason: "Crab wins at 0.18.", reason_hash: "sha256:r", bid_hash: "sha256:b", award_tx: "TxA", escrow_tx: "TxE", round_sent: 1, at: NOW - 100 });
+    job(1, { state: "refunded", codes: ["COMPLAINT_UPHELD"], complaint_hash: "sha256:c", reviewed_at: NOW - 50 });
+    job(2, { state: "refund_due", codes: ["BRIEF_INVALID"], reviewed_at: NOW - 40 });
+    const c = await parsed(Company, await get("/v1/company"));
+    expect(c.auctions).toEqual([{ orderId: "j_000001", jobType: "summary", price: "0.60", cap: "0.30", bids: [{ worker: "crab", price: "0.18", etaSecs: 70, state: "winner" }, { worker: "raven", price: "0.24", etaSecs: 45, state: "lost" }], winner: "crab", reason: "Crab wins at 0.18.", outcome: "complaint" }]);
+    expect(c.incidents.map((i) => [i.orderId, i.kind, i.strike])).toEqual([["j_000002", "brief_invalid", true], ["j_000001", "complaint_upheld", true]]);
+    for (const i of c.incidents) expect(i.text).not.toMatch(/[;—–]|\w-\w/);
+    expect(c.sample).toMatchObject({ auctions: false, incidents: false });
+  });
+});
+
+describe("out_of_budget (FR-64)", () => {
+  const walletConfig = { ...config, walletId: "wallet.sharkco.testnet" };
+  it("refuses to quote and says so on /health when Shark's wallet can't cover a job", async () => {
+    // summary: 1.00 band max × 50% + 0.05 review fee = 0.55 needed
+    app = createApp({ config: walletConfig, chain: fakeChain({ usdcBalance: async () => "549999" }), store, now: () => NOW });
+    expect((await post("/v1/orders", order())).status).toBe(503);
+    expect((await parsed(Health, await get("/v1/health"))).state).toBe("out_of_budget");
+    app = createApp({ config: walletConfig, chain: fakeChain({ usdcBalance: async () => "1000000" }), store, now: () => NOW });
+    expect((await post("/v1/orders", order())).status).toBe(402);
+    expect((await parsed(Health, await get("/v1/health"))).state).toBe("ok");
+  });
+  it("/health says no_worker when every worker is suspended", async () => {
+    app = makeApp(fakeChain({ workers: async () => [] }));
+    expect((await parsed(Health, await get("/v1/health"))).state).toBe("no_worker");
   });
 });

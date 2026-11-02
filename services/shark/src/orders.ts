@@ -18,7 +18,7 @@ import {
 } from "@shark/shared";
 import { MODEL_RULE_CODES, runCodeChecks } from "@shark/checks";
 import type { Hono } from "hono";
-import { buildBrief, priceJob, refuseHarmful } from "./brief";
+import { buildBrief, infeasibleFixes, priceJob, refuseHarmful } from "./brief";
 import type { Chain, ContractJob } from "./chain";
 import type { Config } from "./config";
 import { HttpError } from "./errors";
@@ -56,13 +56,19 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
     idOf: (account) => (account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : null),
   };
 
-  async function serviceCheck(jobType: string) {
+  async function serviceCheck(jobType: OrderRequest["jobType"]) {
     const state = await chain.serviceState();
     if (state !== "ok") throw new HttpError(503, state, `Shark is ${state} and takes no new orders right now. Nothing was charged.`, undefined, 60);
     const workers = await chain.workers();
-    if (!workers.some((w) => !w.suspended && w.types.includes(jobType as never)))
+    if (!workers.some((w) => !w.suspended && w.types.includes(jobType)))
       throw new HttpError(503, "no_worker", "No worker can take this job right now. Nothing was charged.", undefined, 60);
-    // shortcut: out_of_budget needs Shark's wallet balance; add it with the OutLayer wallet (FR-64)
+    // FR-64: Shark's wallet must cover the largest worker fee this type can take plus a review fee
+    if (config.walletId) {
+      const cfg = await chain.config();
+      const need = (BigInt(cfg[jobType].band_max) * BigInt(cfg.worker_cap_bps)) / 10_000n + BigInt(cfg.review_fee);
+      if (BigInt(await chain.usdcBalance(config.walletId)) < need)
+        throw new HttpError(503, "out_of_budget", "Shark has spent today's budget. Try again tomorrow. Nothing was charged.", undefined, 3600);
+    }
   }
 
   async function snapshotFor(input: OrderRequest["input"]): Promise<{ snap: Snapshot; source: string | null } | null> {
@@ -131,14 +137,21 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
     const size = snap ? { pages: snap.snap.pages, words: snap.snap.words } : { pages: 0, words: 0 };
     const inputHash = sha256Ref(snap?.snap.text ?? "");
     if (snap) store.putBlob(inputHash, snap.snap.text);
-    const brief = buildBrief(req.jobType, req.params);
-    const briefHash = sha256Ref(canonicalJson(brief));
-    store.putBlob(briefHash, canonicalJson(brief));
-
     const [cfg, floorBase] = await Promise.all([chain.config(), chain.priceFloor(req.jobType)]);
     const band = { min: BigInt(cfg[req.jobType].band_min), max: BigInt(cfg[req.jobType].band_max) };
     const floor = BigInt(floorBase);
     if (floor > band.max) throw new HttpError(503, "no_worker", "No worker can take this job inside its price band right now. Nothing was charged.", undefined, 60);
+
+    let brief: Brief;
+    try {
+      brief = buildBrief(req.jobType, req.params);
+    } catch (e) {
+      if (!(e instanceof HttpError) || e.code !== "brief_infeasible") throw e;
+      const fixes = infeasibleFixes(req.jobType, req.params).map((f) => ({ ...f, price: usdc(priceJob(buildBrief(req.jobType, f.params as never), size, band, floor).price) }));
+      throw new HttpError(422, "brief_infeasible", e.message, { ...e.details, fixes });
+    }
+    const briefHash = sha256Ref(canonicalJson(brief));
+    store.putBlob(briefHash, canonicalJson(brief));
     const { price, reason } = priceJob(brief, size, band, floor);
 
     const quoteId = `q_${ulid(now() * 1000)}`;

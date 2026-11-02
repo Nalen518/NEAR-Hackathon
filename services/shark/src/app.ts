@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { agentRoutes } from "./agents";
 import type { Chain } from "./chain";
-import { companyOf, pricesOf } from "./company";
+import { companyOf, pricesOf, serviceStateOf } from "./company";
 import type { Config } from "./config";
 import { HttpError, sendError } from "./errors";
 import { orderRoutes } from "./orders";
@@ -44,16 +44,15 @@ export function createApp({ config, chain, store, now = () => Math.floor(Date.no
     return sendError(c, new HttpError(502, "upstream_unavailable", "Shark can't reach NEAR right now. Nothing was charged.", undefined, 30));
   });
 
-  // shortcut: state is the contract's only; no_worker and out_of_budget join when workers and the wallet exist
-  const serviceState = () => chain.serviceState();
+  const serviceState = () => serviceStateOf(config, chain);
 
   app.get("/v1/health", async (c) =>
     c.json({ ok: true, network: config.networkId, state: await serviceState(), contract: config.contractId, version: config.version }),
   );
 
-  app.get("/v1/prices", async (c) => c.json({ network: config.networkId, ...(await pricesOf(chain)) }));
+  app.get("/v1/prices", async (c) => c.json({ network: config.networkId, ...(await pricesOf(chain, store, now())) }));
 
-  app.get("/v1/company", async (c) => c.json(await companyOf(config, chain, now())));
+  app.get("/v1/company", async (c) => c.json(await companyOf(config, chain, store, now())));
 
   app.get("/v1/payment-options", (c) => {
     const options: PaymentOptions["options"] = [

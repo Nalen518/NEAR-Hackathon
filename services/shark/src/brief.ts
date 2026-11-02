@@ -16,7 +16,7 @@ export function buildBrief(jobType: JobType, raw: OrderRequest["params"]): Brief
     const format = (p.format as "paragraph" | "bullets" | undefined) ?? "paragraph";
     const language = (p.language as string | undefined) ?? "en";
     if (maxWords < 10 * mustMention.length)
-      throw infeasible("max_words_too_low", `${maxWords} words can't cover ${mustMention.length} required points. Reduce the points or raise the limit to ${10 * mustMention.length}.`);
+      throw infeasible("max_words_vs_must_mention", `${maxWords} words can't cover ${mustMention.length} required points. Reduce the points or raise the limit to ${10 * mustMention.length}.`);
     const checklist = [code("C1", `word_count <= ${maxWords}`)];
     if (mustMention.length) checklist.push(code(`C${checklist.length + 1}`, "mentions_all"));
     checklist.push(code(`C${checklist.length + 1}`, `language == ${language}`));
@@ -29,7 +29,7 @@ export function buildBrief(jobType: JobType, raw: OrderRequest["params"]): Brief
     const mustInclude = (p.mustInclude as string[] | undefined) ?? [];
     const tone = (p.tone as string | undefined) ?? "neutral";
     if (posts * 280 < 30 * mustInclude.length)
-      throw infeasible("posts_too_few", `${posts} posts can't fit ${mustInclude.length} required items. Add posts or remove items.`);
+      throw infeasible("posts_vs_must_include", `${posts} posts can't fit ${mustInclude.length} required items. Add posts or remove items.`);
     const checklist = [code("C1", `post_count == ${posts}`), code("C2", "post_length <= 280")];
     if (mustInclude.length) checklist.push(code(`C${checklist.length + 1}`, "includes_all"));
     checklist.push(code(`C${checklist.length + 1}`, "no_extra_handles"), model("M1", "on topic"), model("M2", "no invented facts"));
@@ -54,6 +54,28 @@ export function buildBrief(jobType: JobType, raw: OrderRequest["params"]): Brief
     ],
     deliverableFormat: "application/json",
   };
+}
+
+/** Ways to make an infeasible brief feasible (C3, gap G21), same rules the web offers. Each gets a price by the caller. */
+export function infeasibleFixes(jobType: JobType, raw: OrderRequest["params"]): { label: string; params: Record<string, unknown> }[] {
+  const p = { ...((raw ?? {}) as Record<string, unknown>) };
+  const fixes: { label: string; params: Record<string, unknown> }[] = [];
+  if (jobType === "summary") {
+    const n = ((p.mustMention as string[] | undefined) ?? []).length;
+    const maxWords = (p.maxWords as number | undefined) ?? 150;
+    const raise = Math.min(500, Math.max(10 * n, maxWords * 2));
+    if (raise >= 10 * n) fixes.push({ label: `Raise the limit to ${raise} words`, params: { ...p, maxWords: raise } });
+    const keep = Math.floor(maxWords / 10);
+    if (keep >= 1 && keep < n) fixes.push({ label: `Keep ${keep} required ${keep === 1 ? "point" : "points"}`, params: { ...p, mustMention: (p.mustMention as string[]).slice(0, keep) } });
+  } else if (jobType === "thread") {
+    const n = ((p.mustInclude as string[] | undefined) ?? []).length;
+    const posts = (p.posts as number | undefined) ?? 5;
+    const need = Math.ceil((30 * n) / 280);
+    if (need <= 10) fixes.push({ label: `Use ${Math.max(need, 2)} posts`, params: { ...p, posts: Math.max(need, 2) } });
+    const keep = Math.floor((posts * 280) / 30);
+    if (keep >= 1 && keep < n) fixes.push({ label: `Keep ${keep} required items`, params: { ...p, mustInclude: (p.mustInclude as string[]).slice(0, keep) } });
+  }
+  return fixes;
 }
 
 // shortcut: a pattern list until NEAR AI's classifier is wired in (needs NEARAI_API_KEY, FR-04)

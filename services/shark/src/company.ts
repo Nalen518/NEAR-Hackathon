@@ -1,8 +1,9 @@
 // GET /v1/prices and GET /v1/company (API §1.7, §1.9, v2.3 P6 core). Every number comes from the contract;
 // a section whose data has no live source yet says so with `sample: true`, and the web labels it SAMPLE.
-import { fromBase, JobType, type Company, type LedgerJob, type Prices, type Worker, type WorkerId } from "@shark/shared";
+import { fromBase, JobType, type AuctionRecord, type Company, type Incident, type LedgerJob, type Prices, type Worker, type WorkerId } from "@shark/shared";
 import type { Chain, ContractJob } from "./chain";
 import type { Config } from "./config";
+import type { Store } from "./store";
 
 const usdc = (base: string | bigint) => fromBase(BigInt(base));
 const iso = (secs: number) => new Date(secs * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -11,13 +12,40 @@ const QUOTE_TTL_SECS = 600;
 const SUSPEND_WINDOW_JOBS = 20; // SRD FR-47
 const UNRESOLVED_TIMEOUT_SECS = 7 * DAY; // SRD FR-46
 
-export async function pricesOf(chain: Chain): Promise<Prices> {
+// a paid quote stays paid, so it is looked up once (C1)
+const paidQuotes = new Set<string>();
+
+export async function pricesOf(chain: Chain, store: Store, now: number): Promise<Prices> {
   const [cfg, floors] = await Promise.all([chain.config(), Promise.all(JobType.options.map((t) => chain.priceFloor(t)))]);
   const types = Object.fromEntries(
     JobType.options.map((t, i) => [t, { band: { min: usdc(cfg[t].band_min), max: usdc(cfg[t].band_max) }, floor: usdc(floors[i]) }]),
   ) as Prices["types"];
-  // shortcut: recentQuotes stays empty until stored quotes are listed here (P5, could)
-  return { types, recentQuotes: [] };
+  const recent = store.recentQuotes(20);
+  await Promise.all(recent.filter((q) => !paidQuotes.has(q.id)).map(async (q) => (await chain.jobByQuote(q.id)) && paidQuotes.add(q.id)));
+  // shortcut: "returned" and its reason need the payment_returned event; until the event reader an unpaid quote is open or expired
+  const recentQuotes: Prices["recentQuotes"] = recent.map((q) => ({
+    at: iso(q.created_at),
+    jobType: q.job_type as JobType,
+    price: usdc(q.price),
+    reason: q.reason,
+    ...(paidQuotes.has(q.id) ? { status: "paid" as const } : now > q.expires_at ? { status: "expired" as const } : {}),
+    returnReason: null,
+    tx: null,
+  }));
+  return { types, recentQuotes };
+}
+
+/** D-146 order: closed, paused, caged (contract), then no_worker, then out_of_budget (FR-64), for /health and /company. */
+export async function serviceStateOf(config: Config, chain: Chain): Promise<Company["state"]> {
+  const state = await chain.serviceState();
+  if (state !== "ok") return state;
+  if (!(await chain.workers()).some((w) => !w.suspended)) return "no_worker";
+  if (config.walletId) {
+    const cfg = await chain.config();
+    const need = JobType.options.map((t) => (BigInt(cfg[t].band_max) * BigInt(cfg.worker_cap_bps)) / 10_000n + BigInt(cfg.review_fee)).reduce((a, b) => (a < b ? a : b));
+    if (BigInt(await chain.usdcBalance(config.walletId)) < need) return "out_of_budget";
+  }
+  return "ok";
 }
 
 /** The split `finalize` makes (SRD §8.6), so the ledger and P&L match the contract to the base unit. */
@@ -31,15 +59,15 @@ function split(j: ContractJob) {
   return { price, worker, review, referral, profit: profit > 0n ? profit : 0n, owners, reserve: price - referral - owners };
 }
 
-export async function companyOf(config: Config, chain: Chain, now: number): Promise<Company & { network: string }> {
+export async function companyOf(config: Config, chain: Chain, store: Store, now: number): Promise<Company & { network: string }> {
   const [state, cfg, stats, roles, workers, reviewer, prices] = await Promise.all([
-    chain.serviceState(),
+    serviceStateOf(config, chain),
     chain.config(),
     chain.stats(),
     chain.roles(),
     chain.workers(),
     chain.reviewer(),
-    pricesOf(chain),
+    pricesOf(chain, store, now),
   ]);
   // shortcut: reads every job each call; fine for a hackathon's few hundred jobs, cache or index beyond that
   const jobs: ContractJob[] = [];
@@ -75,6 +103,47 @@ export async function companyOf(config: Config, chain: Chain, now: number): Prom
         refund: j.state === "refunded" || j.state === "refund_due" ? usdc(s.price) : null,
       };
     });
+
+  const byId = new Map(jobs.map((j) => [j.id, j]));
+  const auctions: AuctionRecord[] = store.auctions(20).flatMap((a) => {
+    const j = byId.get(a.job_id);
+    if (!j) return [];
+    const outcome: AuctionRecord["outcome"] = j.complaint_hash && (j.state === "refund_due" || j.state === "refunded")
+      ? "complaint"
+      : j.state === "refund_due" || j.state === "refunded"
+        ? "refunded"
+        : j.state === "delivered" || j.state === "complaint_review" || j.state === "finalized"
+          ? "delivered"
+          : "working";
+    return [
+      {
+        orderId: `j_${String(j.id).padStart(6, "0")}`,
+        jobType: j.job_type,
+        price: usdc(j.price),
+        cap: usdc(a.cap),
+        bids: a.bids.flatMap((b) => {
+          const id = idOf(b.account);
+          return id ? [{ worker: id, price: b.price === "0" ? "0.00" : b.price, etaSecs: b.etaSecs, state: b.state }] : [];
+        }),
+        winner: idOf(a.winner),
+        reason: a.reason,
+        outcome,
+      },
+    ];
+  });
+
+  // shortcut: from job state only; disputes, late work and strike events join with the event reader
+  const incidents: Incident[] = jobs
+    .flatMap((j): Incident[] => {
+      const at = iso(j.reviewed_at ?? j.paid_at);
+      const orderId = `j_${String(j.id).padStart(6, "0")}`;
+      if (j.codes.includes("COMPLAINT_UPHELD")) return [{ at, orderId, kind: "complaint_upheld", text: "Complaint upheld: the brief did not match the order. Refunded.", strike: true }];
+      if (j.codes.includes("COMPLAINT_REJECTED")) return [{ at, orderId, kind: "complaint_rejected", text: "Complaint rejected: the brief matched the order.", strike: false }];
+      if (j.codes.includes("BRIEF_INVALID")) return [{ at, orderId, kind: "brief_invalid", text: "The brief could not be met. Refunded.", strike: true }];
+      return [];
+    })
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, 20);
 
   const workerCards: Worker[] = workers.flatMap((w) => {
     const id = idOf(w.id);
@@ -169,8 +238,8 @@ export async function companyOf(config: Config, chain: Chain, now: number): Prom
     },
     // shortcut: payouts need tx hashes from NEP-297 events (an indexer); empty and marked sample until then
     payouts: [],
-    auctions: [],
-    incidents: [],
+    auctions,
+    incidents,
     sample: {
       strikes: false,
       reserve: false,
@@ -183,8 +252,8 @@ export async function companyOf(config: Config, chain: Chain, now: number): Prom
       config: false,
       payouts: true,
       guardian: false,
-      auctions: true,
-      incidents: true,
+      auctions: false,
+      incidents: false,
     },
   };
 }

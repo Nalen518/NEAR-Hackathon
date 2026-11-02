@@ -82,6 +82,15 @@ export function openStore(dir: string) {
     complaintsSince: (payer: string, since: number) =>
       (db.prepare("select count(*) as n from complaints where payer = ? and at >= ?").get(payer, since) as { n: number }).n,
     addComplaint: (payer: string, at: number) => db.prepare("insert into complaints values (?, ?)").run(payer, at),
+    /** Newest first. */
+    recentQuotes: (limit: number) =>
+      db.prepare("select id, created_at, expires_at, job_type, price, reason from quotes order by created_at desc, rowid desc limit ?").all(limit) as Pick<
+        QuoteRow,
+        "id" | "created_at" | "expires_at" | "job_type" | "price" | "reason"
+      >[],
+    /** Newest first. */
+    auctions: (limit: number): AuctionRow[] =>
+      (db.prepare("select row from auctions order by json_extract(row, '$.at') desc, job_id desc limit ?").all(limit) as { row: string }[]).map((r) => JSON.parse(r.row)),
     putAuction: (a: AuctionRow) => db.prepare("insert or replace into auctions values (?, ?)").run(a.job_id, JSON.stringify(a)),
     auction: (jobId: number): AuctionRow | undefined => {
       const r = db.prepare("select row from auctions where job_id = ?").get(jobId) as { row: string } | undefined;
