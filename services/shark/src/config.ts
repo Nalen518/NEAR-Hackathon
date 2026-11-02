@@ -13,6 +13,13 @@ export type Config = {
   x402FacilitatorUrl: string | null;
   webOrigins: string[];
   version: string;
+  /** Signs quotes only (NFR-04). NEAR key format "ed25519:..." */
+  quoteKey: string;
+  /** Shark's account and function-call key, for complain/award/... (optional until those calls are needed) */
+  sharkId: string | null;
+  sharkKey: string | null;
+  fileStorePath: string;
+  rateLimitPerMin: number;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -34,5 +41,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     x402FacilitatorUrl: env[`${NET}_X402_FACILITATOR_URL`] || null,
     webOrigins: (env.WEB_ORIGINS ?? "http://localhost:3100,http://localhost:3000").split(",").map((s) => s.trim()).filter(Boolean),
     version: env.SHARK_VERSION ?? "0.1.0",
+    quoteKey: env.SHARK_QUOTE_KEY ?? (() => { throw new Error("SHARK_QUOTE_KEY is not set"); })(),
+    sharkId: env[`${NET}_SHARK_ID`] || null,
+    sharkKey: env.SHARK_FN_KEY || null,
+    fileStorePath: env.FILE_STORE_PATH ?? "./data",
+    rateLimitPerMin: Number(env.RATE_LIMIT_PER_MIN ?? 30),
   };
 }

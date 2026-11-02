@@ -333,3 +333,21 @@ fn the_guardian_cannot_unpause() {
     c.pause();
     c.unpause();
 }
+
+/// Shark (TypeScript) must produce exactly these bytes; services/shark/test/quote.test.ts pins the same string.
+#[test]
+fn canonical_quote_bytes() {
+    let q = quote("q_A", 600_000, "buyer.testnet");
+    assert_eq!(
+        serde_json::to_string(&q).unwrap(),
+        r#"{"brief_hash":"sha256:b","expires_at":2000,"input_hash":"sha256:i","job_type":"summary","network":"near:testnet","payer":"buyer.testnet","price":"600000","quote_id":"q_A","referrer":"ref.testnet"}"#
+    );
+}
+
+#[test]
+fn job_by_quote_finds_the_paid_job() {
+    let mut c = setup();
+    pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    assert_eq!(c.get_job_by_quote("q_A".into()).unwrap().id, 1);
+    assert!(c.get_job_by_quote("q_B".into()).is_none());
+}

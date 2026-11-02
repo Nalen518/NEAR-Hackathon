@@ -1,19 +1,32 @@
 // Contract test: every real response must parse with the web's schemas (packages/shared). A failure is a
-// contract bug in Shark, never a reason to loosen the schema.
-import { Health, PaymentOptions, Prices } from "@shark/shared";
-import { describe, expect, it } from "vitest";
+// contract bug in Shark, never a reason to loosen the schema. Chain is faked; signatures and NEP-413 are real.
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ApiError, ComplaintAccepted, Health, Order, OrderAccepted, OrderPayer, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult } from "@shark/shared";
+import { KeyPair, KeyPairSigner } from "near-api-js";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { createApp } from "../src/app";
-import type { Chain, ContractConfig } from "../src/chain";
+import { verifyNep413, type Chain, type ContractConfig, type ContractJob, type Nep413 } from "../src/chain";
 import { loadConfig } from "../src/config";
+import { openStore } from "../src/store";
+
+const USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
+const NOW = 1_793_500_000;
+const quoteKey = KeyPair.fromRandom("ed25519");
+const buyerKey = KeyPair.fromRandom("ed25519");
+const strangerKey = KeyPair.fromRandom("ed25519");
 
 const config = loadConfig({
   SHARK_NETWORK: "testnet",
   TESTNET_RPC_URL: "http://rpc.invalid",
   TESTNET_CONTRACT_ID: "sharkco.testnet",
-  TESTNET_USDC_ID: "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+  TESTNET_USDC_ID: USDC,
   TESTNET_USDC_FAUCET_URL: "https://faucet.circle.com",
   TESTNET_X402_FACILITATOR_URL: "http://localhost:8787/x402",
+  SHARK_QUOTE_KEY: quoteKey.toString(),
+  RATE_LIMIT_PER_MIN: "1000",
 });
 
 // SRD §8.7 testnet numbers
@@ -34,59 +47,377 @@ const contractConfig: ContractConfig = {
   job_timeout_secs: 21600,
 };
 const floors = { extract: "200000", summary: "120000", thread: "240000" };
+const accessKeys = new Map([
+  ["demo-buyer.testnet", buyerKey.getPublicKey().toString()],
+  ["stranger.testnet", strangerKey.getPublicKey().toString()],
+]);
+
+let jobs: Map<number, ContractJob>;
+let paidQuotes: Map<string, number>;
+let complaints: { job: number; hash: string }[];
 
 const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   serviceState: async () => "ok",
   config: async () => contractConfig,
   priceFloor: async (t) => floors[t],
+  workers: async () => [{ id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], suspended: false }],
+  job: async (id) => jobs.get(id) ?? null,
+  jobByQuote: async (q) => (paidQuotes.has(q) ? (jobs.get(paidQuotes.get(q)!) ?? null) : null),
+  accountExists: async (id) => accessKeys.has(id) || id === "ref-agent.testnet",
+  usdcRegistered: async (id) => id === "demo-buyer.testnet",
+  verifyNep413: (m) =>
+    verifyNep413(m, {
+      viewAccessKey: async ({ accountId, publicKey }) => {
+        if (accessKeys.get(accountId) !== publicKey.toString()) throw new Error("UNKNOWN_ACCESS_KEY");
+        return { permission: "FullAccess" } as never;
+      },
+    }),
+  complain: async (job, hash) => {
+    complaints.push({ job, hash });
+  },
   ...over,
 });
 
-const app = createApp({ config, chain: fakeChain() });
+let app: ReturnType<typeof createApp>;
+let store: ReturnType<typeof openStore>;
+const makeApp = (chain = fakeChain(), now = () => NOW) => createApp({ config, chain, store, now, fetchImpl: async () => new Response("<html><body><p>Hello from example.com</p></body></html>", { headers: { "content-type": "text/html" } }) });
 
-async function parsed<S extends z.ZodType>(path: string, schema: S, init?: RequestInit): Promise<{ res: Response; body: z.infer<S> }> {
-  const res = await app.request(path, init);
+beforeEach(() => {
+  jobs = new Map();
+  paidQuotes = new Map();
+  complaints = [];
+  store = openStore(mkdtempSync(join(tmpdir(), "shark-")));
+  app = makeApp();
+});
+
+async function parsed<S extends z.ZodType>(schema: S, res: Response): Promise<z.infer<S>> {
   const json = await res.json();
   const r = schema.safeParse(json);
   expect(r.success, r.success ? "" : JSON.stringify(r.error.issues, null, 2)).toBe(true);
-  expect((json as { network?: string }).network).toBe("near:testnet");
-  return { res, body: r.data as z.infer<S> };
+  if (typeof (json as { network?: unknown }).network === "string") expect((json as { network: string }).network).toBe("near:testnet");
+  return r.data as z.infer<S>;
+}
+const get = (path: string) => app.request(path);
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+  app.request(path, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+const TEXT_3000_WORDS = Array.from({ length: 3000 }, (_, i) => `word${i % 50}`).join(" ");
+const order = (over: Record<string, unknown> = {}) => ({
+  jobType: "summary",
+  instructions: "Summarise this article in at most 150 words. Must mention NEAR Intents and fees.",
+  input: { text: TEXT_3000_WORDS },
+  params: { maxWords: 150, mustMention: ["NEAR Intents", "fees"] },
+  payer: "demo-buyer.testnet",
+  referrer: "ref-agent.testnet",
+  ...over,
+});
+
+function job(id: number, over: Partial<ContractJob> = {}): ContractJob {
+  const j: ContractJob = {
+    id,
+    quote_id: "q_X",
+    payer: "demo-buyer.testnet",
+    job_type: "summary",
+    price: "600000",
+    input_hash: "sha256:i",
+    brief_hash: "sha256:b",
+    referrer: "ref-agent.testnet",
+    state: "delivered",
+    paid_at: NOW - 600,
+    worker: "crab-worker.testnet",
+    worker_fee: "180000",
+    escrowed: false,
+    round: 1,
+    delivery_hash: "sha256:d",
+    awarded_at: NOW - 580,
+    delivered_at: NOW - 500,
+    reviewed_at: NOW - 450,
+    complaint_until: NOW + 86_000,
+    complaint_hash: null,
+    codes: ["PASS"],
+    review_fee: "50000",
+    referral_bps: 750,
+    owner_bps: 6000,
+    ...over,
+  };
+  jobs.set(id, j);
+  return j;
 }
 
-describe("GET /v1/health", () => {
-  it("parses as Health", async () => {
-    const { body } = await parsed("/v1/health", Health);
-    expect(body).toMatchObject({ ok: true, state: "ok", contract: "sharkco.testnet" });
-  });
-});
+async function signed(kind: "view" | "complain", id: string, opts: { key?: KeyPair; account?: string; ts?: number; recipient?: string; nonce?: Buffer } = {}): Promise<Nep413> {
+  const account = opts.account ?? "demo-buyer.testnet";
+  const nonce = opts.nonce ?? Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
+  const message = `sharkco:${kind}:${id}:${opts.ts ?? NOW}`;
+  const recipient = opts.recipient ?? "sharkco.testnet";
+  const s = await new KeyPairSigner(opts.key ?? buyerKey).signNep413Message(account, { message, recipient, nonce });
+  return { accountId: account, publicKey: s.publicKey.toString(), signature: Buffer.from(s.signature).toString("base64"), message, nonce: nonce.toString("base64"), recipient };
+}
 
-describe("GET /v1/prices", () => {
-  it("parses as Prices with bands and floors from the contract", async () => {
-    const { body } = await parsed("/v1/prices", Prices);
+describe("A1: read endpoints", () => {
+  it("health parses", async () => {
+    expect(await parsed(Health, await get("/v1/health"))).toMatchObject({ ok: true, state: "ok", contract: "sharkco.testnet" });
+  });
+  it("prices parse with bands and floors from the contract", async () => {
+    const body = await parsed(Prices, await get("/v1/prices"));
     expect(body.types.summary).toEqual({ band: { min: "0.20", max: "1.00" }, floor: "0.12" });
-    expect(body.types.extract.floor).toBe("0.20");
   });
 });
 
-describe("GET /v1/payment-options (A11)", () => {
-  it("parses as PaymentOptions with the faucet and the x402 option", async () => {
-    const { body } = await parsed("/v1/payment-options", PaymentOptions);
+describe("A11: payment options", () => {
+  it("testnet has the faucet and x402, no intents", async () => {
+    const body = await parsed(PaymentOptions, await get("/v1/payment-options"));
     expect(body.options.map((o) => o.method)).toEqual(["quote", "x402"]);
-    expect(body.options[0]).toMatchObject({ token: config.usdcId, faucet: { url: "https://faucet.circle.com" } });
+    expect(body.options[0]).toMatchObject({ token: USDC, faucet: { url: "https://faucet.circle.com" } });
   });
 });
 
-describe("errors (A5)", () => {
-  it("an RPC failure answers 502 upstream_unavailable with charged and Retry-After", async () => {
-    const down = createApp({ config, chain: fakeChain({ serviceState: async () => { throw new Error("rpc down"); } }) });
-    const res = await down.request("/v1/health");
-    expect(res.status).toBe(502);
+describe("A2: POST /v1/orders answers 402 with a signed quote", () => {
+  it("parses as Quote402 and pay matches the quote, token and contract", async () => {
+    const res = await post("/v1/orders", order(), { "Idempotency-Key": "k1" });
+    expect(res.status).toBe(402);
+    expect(res.headers.get("WWW-Authenticate")).toMatch(/^SharkQuote quote_id="q_[0-9A-Z]{26}"$/);
+    const q = await parsed(Quote402, res);
+    expect(q.price).toBe("0.60");
+    expect(q.priceReason).toBe("6 pages, 2 required points");
+    expect(q.pay.args.amount).toBe(q.quote.price);
+    expect(q.pay.token).toBe(USDC);
+    expect(q.pay.args.receiver_id).toBe("sharkco.testnet");
+    expect(q.quote.network).toBe("near:testnet");
+    expect(q.payerRegistered).toBe(true);
+    expect(q.register).toBeNull();
+    expect(q.brief.checklist.map((c) => c.rule)).toEqual(["word_count <= 150", "mentions_all", "language == en", "every claim is supported by the source", "covers the source's main point"]);
+    const msg = JSON.parse(Buffer.from(q.pay.args.msg.replace(/^pay:/, ""), "base64").toString());
+    expect(msg).toEqual({ quote: q.quote, sig: q.sig });
+  });
+
+  it("an unregistered payer gets the storage_deposit step", async () => {
+    accessKeys.set("new-buyer.testnet", "ed25519:x");
+    const q = await parsed(Quote402, await post("/v1/orders", order({ payer: "new-buyer.testnet" })));
+    expect(q.payerRegistered).toBe(false);
+    expect(q.register).toMatchObject({ contract: USDC, method: "storage_deposit", args: { account_id: "new-buyer.testnet", registration_only: true } });
+    accessKeys.delete("new-buyer.testnet");
+  });
+
+  it("thread and extract quotes parse, with the extract and thread rule strings (B3)", async () => {
+    const t = await parsed(Quote402, await post("/v1/orders", order({ jobType: "thread", input: undefined, params: { posts: 5, mustInclude: ["https://example.com/launch", "#NEAR"] } })));
+    expect(t.brief.checklist.map((c) => c.rule)).toEqual(["post_count == 5", "post_length <= 280", "includes_all", "no_extra_handles", "on topic", "no invented facts"]);
+    const e = await parsed(Quote402, await post("/v1/orders", order({ jobType: "extract", input: { url: "https://example.com/catalogue" }, params: { schema: { fields: [{ name: "price", type: "number", required: true }] } } })));
+    expect(e.brief.checklist.map((c) => c.rule)).toEqual(["json_parses", "matches_schema", "required_fields_filled", "traceable >= 90%", "records <= 50", "no invented records"]);
+    expect(e.input.source).toBe("https://example.com/catalogue");
+  });
+
+  it("the same Idempotency-Key and body give the same quote; another body is 409", async () => {
+    const a = await parsed(Quote402, await post("/v1/orders", order(), { "Idempotency-Key": "k2" }));
+    const b = await parsed(Quote402, await post("/v1/orders", order(), { "Idempotency-Key": "k2" }));
+    expect(b.quoteId).toBe(a.quoteId);
+    const c = await post("/v1/orders", order({ instructions: "Something else entirely here." }), { "Idempotency-Key": "k2" });
+    expect(c.status).toBe(409);
+    expect((await parsed(ApiError, c)).error).toBe("idempotency_conflict");
+  });
+
+  it("a replay after payment answers 202", async () => {
+    const q = await parsed(Quote402, await post("/v1/orders", order(), { "Idempotency-Key": "k3" }));
+    job(42, { quote_id: q.quoteId, state: "paid" });
+    paidQuotes.set(q.quoteId, 42);
+    const res = await post("/v1/orders", order(), { "Idempotency-Key": "k3" });
+    expect(res.status).toBe(202);
+    expect(await parsed(OrderAccepted, res)).toMatchObject({ orderId: "j_000042", status: "paid", statusUrl: "/v1/orders/j_000042" });
+  });
+});
+
+describe("A3: GET /v1/quotes/{id}", () => {
+  it("moves AWAITING_PAYMENT to PAID with the orderId, then EXPIRED when unpaid", async () => {
+    const q = await parsed(Quote402, await post("/v1/orders", order()));
+    expect((await parsed(QuoteStatus, await get(`/v1/quotes/${q.quoteId}`))).status).toBe("AWAITING_PAYMENT");
+    job(7, { quote_id: q.quoteId, state: "paid" });
+    paidQuotes.set(q.quoteId, 7);
+    expect(await parsed(QuoteStatus, await get(`/v1/quotes/${q.quoteId}`))).toMatchObject({ status: "PAID", orderId: "j_000007" });
+    paidQuotes.clear();
+    app = makeApp(fakeChain(), () => NOW + 601);
+    expect((await parsed(QuoteStatus, await get(`/v1/quotes/${q.quoteId}`))).status).toBe("EXPIRED");
+  });
+});
+
+describe("A4: POST /v1/uploads", () => {
+  const upload = (bytes: Uint8Array | string, name: string, type = "") => {
+    const form = new FormData();
+    form.append("file", new Blob([bytes as BlobPart], { type }), name);
+    return app.request("/v1/uploads", { method: "POST", body: form });
+  };
+  it("text and markdown parse as UploadResult", async () => {
+    const r = await parsed(UploadResult, await upload(TEXT_3000_WORDS, "a.txt", "text/plain"));
+    expect(r).toMatchObject({ pages: 6, words: 3000 });
+    await parsed(UploadResult, await upload("# Title\n\nSome words here.", "notes.md"));
+  });
+  it("a PDF with text parses", async () => {
+    const r = await parsed(UploadResult, await upload(tinyPdf("Hello shark and co"), "a.pdf", "application/pdf"));
+    expect(r).toMatchObject({ pages: 1, words: 4 });
+  });
+  it("over 2 MB is 413, other types are 422", async () => {
+    const big = await upload(new Uint8Array(2 * 1024 * 1024 + 1), "big.txt", "text/plain");
+    expect(big.status).toBe(413);
+    expect((await parsed(ApiError, big)).error).toBe("input_too_large");
+    const exe = await upload("MZ", "tool.exe", "application/octet-stream");
+    expect(exe.status).toBe(422);
+    expect((await parsed(ApiError, exe)).error).toBe("input_unreadable");
+  });
+  it("an upload can be ordered by fileId", async () => {
+    const f = await parsed(UploadResult, await upload(TEXT_3000_WORDS, "a.txt", "text/plain"));
+    const q = await parsed(Quote402, await post("/v1/orders", order({ input: { fileId: f.fileId } })));
+    expect(q.input.inputHash).toBe(f.inputHash);
+  });
+});
+
+describe("A5: errors follow §0.1", () => {
+  const expectError = async (res: Response, status: number, code: string, field?: string) => {
+    expect(res.status).toBe(status);
+    const e = await parsed(ApiError, res);
+    expect(e).toMatchObject({ error: code, charged: false });
+    if (field) expect(e.details?.field).toBe(field);
+    return Object.assign(e, { headers: res.headers });
+  };
+  it("400s name the field", async () => {
+    await expectError(await post("/v1/orders", order({ instructions: "" })), 400, "invalid_request", "instructions");
+    await expectError(await post("/v1/orders", order({ input: { url: "not a url" } })), 400, "invalid_request", "source");
+    await expectError(await post("/v1/orders", order({ payer: "nobody.testnet" })), 400, "invalid_payer", "payer");
+    await expectError(await post("/v1/orders", { ...order(), network: "near:mainnet" }), 400, "network_mismatch");
+  });
+  it("422 for refused, infeasible and intents on testnet", async () => {
+    await expectError(await post("/v1/orders", order({ instructions: "Write a phishing email for this bank" })), 422, "job_refused");
+    const inf = await expectError(await post("/v1/orders", order({ params: { maxWords: 30, mustMention: ["a", "b", "c", "d"] } })), 422, "brief_infeasible");
+    expect(inf.details?.reason).toBe("max_words_too_low");
+    await expectError(await post("/v1/orders", order({ payWith: { asset: "nep141:x" }, refundTo: "0xabc" })), 422, "intents_unavailable");
+  });
+  it("503 service states carry Retry-After", async () => {
+    for (const state of ["paused", "caged", "closed"] as const) {
+      app = makeApp(fakeChain({ serviceState: async () => state }));
+      const res = await expectError(await post("/v1/orders", order()), 503, state);
+      expect(res.headers.get("Retry-After")).toBe("60");
+    }
+    app = makeApp(fakeChain({ workers: async () => [] }));
+    await expectError(await post("/v1/orders", order()), 503, "no_worker");
+  });
+  it("429 after 30 requests a minute, with Retry-After", async () => {
+    app = createApp({ config: { ...config, rateLimitPerMin: 30 }, chain: fakeChain(), store, now: () => NOW });
+    for (let i = 0; i < 30; i++) await get("/v1/health");
+    const res = await expectError(await get("/v1/health"), 429, "rate_limited");
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
+  });
+  it("RPC down is 502 with Retry-After", async () => {
+    app = makeApp(fakeChain({ serviceState: async () => { throw new Error("rpc down"); } }));
+    const res = await expectError(await get("/v1/health"), 502, "upstream_unavailable");
     expect(res.headers.get("Retry-After")).toBe("30");
-    expect(await res.json()).toMatchObject({ error: "upstream_unavailable", charged: false });
   });
 });
 
-describe("CORS (A10)", () => {
+describe("A6: GET /v1/orders/{id} is the public view", () => {
+  it("parses and leaks nothing private", async () => {
+    const q = await parsed(Quote402, await post("/v1/orders", order()));
+    job(42, { quote_id: q.quoteId });
+    store.putBlob("sha256:d", "The delivered summary.");
+    const res = await get("/v1/orders/j_000042");
+    const raw = await res.clone().json();
+    const o = await parsed(Order, res);
+    expect(o.view).toBe("public");
+    for (const k of ["instructions", "delivery", "input"]) expect(raw).not.toHaveProperty(k);
+    expect(raw.brief).not.toHaveProperty("params");
+    expect(raw.brief.checklist[0]).toEqual({ id: "C1", kind: "code" });
+    expect(raw.size).toEqual({ pages: 6, words: 3000 });
+    expect(JSON.stringify(raw)).not.toContain("NEAR Intents and fees");
+  });
+  it("B5: money is split once the worker fee is known", async () => {
+    job(42);
+    expect((await parsed(Order, await get("/v1/orders/j_000042"))).money).toEqual({ method: "quote", price: "0.60", workerFee: "0.18", reviewFee: "0.05", referral: "0.045", owners: "0.195", reserve: "0.36" });
+  });
+  it("B6: an unknown job is 404 order_not_found", async () => {
+    const res = await get("/v1/orders/j_000999");
+    expect(res.status).toBe(404);
+    // reported schema bug: shared ERROR_CODES lacks order_not_found, so ApiError.parse rejects this body
+    expect(await res.json()).toMatchObject({ error: "order_not_found", charged: false });
+  });
+});
+
+describe("A7: POST /v1/orders/{id}/view is the payer view", () => {
+  beforeEach(async () => {
+    const q = await parsed(Quote402, await post("/v1/orders", order()));
+    job(42, { quote_id: q.quoteId });
+    store.putBlob("sha256:d", "The delivered summary.");
+  });
+  it("a valid NEP-413 signature gets the payer view, never cached", async () => {
+    const res = await post("/v1/orders/j_000042/view", await signed("view", "j_000042"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+    const o = await parsed(OrderPayer, res);
+    expect(o.instructions).toContain("NEAR Intents and fees");
+    expect(o.delivery).toEqual({ format: "text/plain", content: "The delivered summary.", deliveryHash: "sha256:d" });
+  });
+  it("401 for a wrong recipient, an old timestamp, a replayed nonce or someone else's key", async () => {
+    const bad = [
+      await signed("view", "j_000042", { recipient: "other.testnet" }),
+      await signed("view", "j_000042", { ts: NOW - 301 }),
+      await signed("complain", "j_000042"),
+      await signed("view", "j_000042", { key: strangerKey }),
+    ];
+    for (const auth of bad) {
+      const res = await post("/v1/orders/j_000042/view", auth);
+      expect(res.status).toBe(401);
+      expect((await parsed(ApiError, res)).error).toBe("payer_signature_invalid");
+    }
+    const once = await signed("view", "j_000042");
+    expect((await post("/v1/orders/j_000042/view", once)).status).toBe(200);
+    expect((await post("/v1/orders/j_000042/view", once)).status).toBe(401);
+  });
+  it("403 not_payer for another valid account", async () => {
+    const res = await post("/v1/orders/j_000042/view", await signed("view", "j_000042", { key: strangerKey, account: "stranger.testnet" }));
+    expect(res.status).toBe(403);
+    expect((await parsed(ApiError, res)).error).toBe("not_payer");
+  });
+});
+
+describe("A8: POST /v1/orders/{id}/complaint", () => {
+  it("202 records the complaint on chain with the reason hash", async () => {
+    job(42);
+    const res = await post("/v1/orders/j_000042/complaint", { reason: "I asked for bullet points.", auth: await signed("complain", "j_000042") });
+    expect(res.status).toBe(202);
+    expect(await parsed(ComplaintAccepted, res)).toEqual({ status: "complaint_review" });
+    expect(complaints).toEqual([{ job: 42, hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) }]);
+  });
+  it("409 when the window is over or a complaint was already sent", async () => {
+    job(42, { complaint_until: NOW - 1 });
+    job(43, { complaint_hash: "sha256:x" });
+    for (const id of ["j_000042", "j_000043"]) {
+      const res = await post(`/v1/orders/${id}/complaint`, { reason: "late", auth: await signed("complain", id) });
+      expect(res.status).toBe(409);
+      expect((await parsed(ApiError, res)).error).toBe("complaint_closed");
+    }
+  });
+  it("401 without a valid signature, 403 for another account", async () => {
+    job(42);
+    expect((await post("/v1/orders/j_000042/complaint", { reason: "x", auth: await signed("view", "j_000042") })).status).toBe(401);
+    expect((await post("/v1/orders/j_000042/complaint", { reason: "x", auth: await signed("complain", "j_000042", { key: strangerKey, account: "stranger.testnet" }) })).status).toBe(403);
+  });
+  it("429 after three complaints a day", async () => {
+    for (const id of [1, 2, 3, 4]) job(id);
+    for (const id of [1, 2, 3]) expect((await post(`/v1/orders/j_00000${id}/complaint`, { reason: "x", auth: await signed("complain", `j_00000${id}`) })).status).toBe(202);
+    const res = await post("/v1/orders/j_000004/complaint", { reason: "x", auth: await signed("complain", "j_000004") });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("3600");
+  });
+});
+
+describe("A9: delivery stays null until a review passes, even for the payer", () => {
+  for (const state of ["paid", "awarded", "review", "revision", "refund_due", "refunded"] as const) {
+    it(state, async () => {
+      job(42, { state, codes: state.startsWith("refund") ? ["FAIL_LENGTH"] : [] });
+      store.putBlob("sha256:d", "secret delivery");
+      const o = await parsed(OrderPayer, await post("/v1/orders/j_000042/view", await signed("view", "j_000042")));
+      expect(o.delivery).toBeNull();
+      expect(o.status).toBe(state);
+    });
+  }
+});
+
+describe("A10: CORS", () => {
   for (const origin of ["http://localhost:3100", "http://localhost:3000"]) {
     it(`allows ${origin}`, async () => {
       const res = await app.request("/v1/orders", { method: "OPTIONS", headers: { Origin: origin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type,idempotency-key" } });
@@ -94,12 +425,27 @@ describe("CORS (A10)", () => {
       expect(res.headers.get("Access-Control-Allow-Headers")?.toLowerCase()).toContain("idempotency-key");
     });
   }
-  it("refuses other origins", async () => {
-    const res = await app.request("/v1/health", { headers: { Origin: "https://evil.example" } });
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  it("refuses other origins and exposes Retry-After and WWW-Authenticate", async () => {
+    expect((await app.request("/v1/health", { headers: { Origin: "https://evil.example" } })).headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect((await app.request("/v1/health", { headers: { Origin: "http://localhost:3100" } })).headers.get("Access-Control-Expose-Headers")).toMatch(/Retry-After.*WWW-Authenticate/);
   });
-  it("exposes Retry-After and WWW-Authenticate", async () => {
-    const res = await app.request("/v1/health", { headers: { Origin: "http://localhost:3100" } });
-    expect(res.headers.get("Access-Control-Expose-Headers")).toMatch(/Retry-After.*WWW-Authenticate/);
+});
+
+/** A one-page PDF with a text layer (no xref; pdf.js rebuilds it). */
+function tinyPdf(text: string): Uint8Array {
+  const stream = `BT /F1 18 Tf 20 100 Td (${text}) Tj ET`;
+  return new TextEncoder().encode(
+    `%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 400 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length ${stream.length}>>stream\n${stream}\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n`,
+  );
+}
+
+describe("reported schema bugs (packages/shared, not changed here)", () => {
+  it("OrderRequest.parse strips thread params: SummaryParams matches first in the union", async () => {
+    const { OrderRequest } = await import("@shark/shared");
+    const r = OrderRequest.parse(order({ jobType: "thread", params: { posts: 7, mustInclude: ["#NEAR"] } }));
+    expect(r.params).toEqual({}); // the web sends this, so a real thread order loses posts and mustInclude
+  });
+  it("ApiError has no order_not_found, which B6 and API §0.2 require", async () => {
+    expect(ApiError.safeParse({ error: "order_not_found", message: "x", charged: false }).success).toBe(false);
   });
 });

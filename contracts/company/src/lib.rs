@@ -7,7 +7,7 @@
 //! to the OutLayer `request_execution` callback when Owl runs in the TEE (O-03, O-13).
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
-use near_sdk::store::{IterableMap, LookupMap, LookupSet};
+use near_sdk::store::{IterableMap, LookupMap};
 use near_sdk::{
     AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PromiseOrValue, PublicKey, env, ext_contract,
     near, require,
@@ -159,7 +159,9 @@ pub struct Job {
     pub round: u8,
     pub delivery_hash: Option<String>,
     pub work_deadline: u64,
+    pub awarded_at: Option<u64>,
     pub delivered_at: Option<u64>,
+    pub reviewed_at: Option<u64>,
     pub complaint_until: Option<u64>,
     pub complaint_hash: Option<String>,
     pub codes: Vec<String>,
@@ -212,7 +214,8 @@ pub struct Contract {
     next_job: u64,
     workers: IterableMap<AccountId, Worker>,
     reviewer: Option<Reviewer>,
-    used_quotes: LookupSet<String>,
+    /// quote_id → job id: one payment per quote, and Shark finds the job a quote became
+    used_quotes: LookupMap<String, u64>,
     paused: bool,
     closed: bool,
     strikes: u8,
@@ -258,7 +261,7 @@ impl Contract {
             next_job: 1,
             workers: IterableMap::new(Key::Workers),
             reviewer: None,
-            used_quotes: LookupSet::new(Key::UsedQuotes),
+            used_quotes: LookupMap::new(Key::UsedQuotes),
             paused: false,
             closed: false,
             strikes: 0,
@@ -392,6 +395,7 @@ impl Contract {
         j.bid_hash = Some(bid_hash.clone());
         j.reason_hash = Some(reason_hash.clone());
         j.round = 1;
+        j.awarded_at = Some(now_secs());
         j.work_deadline = now_secs() + self.config.work_deadline_secs;
         self.jobs.insert(job, j);
         emit("worker_awarded", json!({ "job_id": job, "worker": worker, "fee": fee, "bid_hash": bid_hash, "reason_hash": reason_hash }));
@@ -424,6 +428,7 @@ impl Contract {
             r.reviews += 1;
         }
         j.codes = result.codes.clone();
+        j.reviewed_at = Some(now_secs());
         let worker = j.worker.clone().unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
         match (j.state, result.mode.as_str()) {
             (JobState::Review, "primary") => {
@@ -567,6 +572,11 @@ impl Contract {
         self.jobs.get(&job).cloned()
     }
 
+    /// The job a paid quote became (API §1.3).
+    pub fn get_job_by_quote(&self, quote_id: String) -> Option<Job> {
+        self.used_quotes.get(&quote_id).and_then(|id| self.jobs.get(id).cloned())
+    }
+
     pub fn get_jobs(&self, from: u64, limit: u64) -> Vec<Job> {
         (from.max(1)..self.next_job).take(limit.min(100) as usize).filter_map(|i| self.jobs.get(&i).cloned()).collect()
     }
@@ -687,11 +697,12 @@ impl Contract {
         if now_secs() > q.expires_at {
             return Err("E_QUOTE_EXPIRED");
         }
-        if !self.used_quotes.insert(q.quote_id.clone()) {
+        if self.used_quotes.contains_key(&q.quote_id) {
             return Err("E_QUOTE_USED");
         }
         let id = self.next_job;
         self.next_job += 1;
+        self.used_quotes.insert(q.quote_id.clone(), id);
         self.jobs.insert(
             id,
             Job {
@@ -713,7 +724,9 @@ impl Contract {
                 round: 0,
                 delivery_hash: None,
                 work_deadline: 0,
+                awarded_at: None,
                 delivered_at: None,
+                reviewed_at: None,
                 complaint_until: None,
                 complaint_hash: None,
                 codes: vec![],
