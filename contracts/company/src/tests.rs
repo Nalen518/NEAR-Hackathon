@@ -215,6 +215,7 @@ fn pass_then_finalize_splits_the_price() {
     let j = c.get_job(id).unwrap();
     assert_eq!(j.state, JobState::Delivered);
     assert_eq!(j.complaint_until, Some(1_200 + 86_400));
+    assert_eq!(j.reasons_hash.as_deref(), Some("sha256:r"));
     ctx("anyone.testnet", 1_200 + 86_401);
     c.finalize(id);
     let s = c.get_stats();

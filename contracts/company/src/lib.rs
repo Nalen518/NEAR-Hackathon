@@ -165,6 +165,8 @@ pub struct Job {
     pub complaint_until: Option<u64>,
     pub complaint_hash: Option<String>,
     pub codes: Vec<String>,
+    /// Owl's full reasons text, stored by Shark under this hash
+    pub reasons_hash: Option<String>,
     // snapshots (FR-73)
     pub review_fee: U128,
     pub referral_bps: u16,
@@ -438,6 +440,7 @@ impl Contract {
         }
         j.codes = result.codes.clone();
         j.reviewed_at = Some(now_secs());
+        j.reasons_hash = Some(result.reasons_hash.clone());
         let worker = j.worker.clone().unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
         match (j.state, result.mode.as_str()) {
             (JobState::Review, "primary") => {
@@ -743,6 +746,7 @@ impl Contract {
                 complaint_until: None,
                 complaint_hash: None,
                 codes: vec![],
+                reasons_hash: None,
                 review_fee: self.config.review_fee,
                 referral_bps: self.config.referral_bps,
                 owner_bps: self.config.owner_bps,

@@ -48,6 +48,7 @@ export type ContractJob = {
   complaint_until: number | null;
   complaint_hash: string | null;
   codes: string[];
+  reasons_hash: string | null;
   review_fee: string;
   referral_bps: number;
   owner_bps: number;

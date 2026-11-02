@@ -16,6 +16,7 @@ import {
   SummaryParams,
   ThreadParams,
 } from "@shark/shared";
+import { MODEL_RULE_CODES, runCodeChecks } from "@shark/checks";
 import type { Hono } from "hono";
 import { buildBrief, priceJob, refuseHarmful } from "./brief";
 import type { Chain, ContractJob } from "./chain";
@@ -335,9 +336,7 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
           reasonHash: auction.reason_hash,
         }
       : null,
-    reviews: job.reviewed_at
-      ? [{ round: job.round, mode: "primary" as const, pass: passed, codes, reasons: passed ? "All checks passed." : "The delivery did not pass review.", attestationUrl: null }]
-      : [],
+    reviews: job.reviewed_at ? [reviewOf(job, brief, codes, ctx)] : [],
     money,
     complaint: {
       allowedUntil: job.complaint_until ? iso(job.complaint_until) : null,
@@ -364,4 +363,26 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
 function deliveryOf(hash: string, brief: Brief, ctx: ViewCtx): OrderPayer["delivery"] {
   const content = ctx.blob(hash);
   return content === null ? null : { format: brief.deliverableFormat as "text/plain" | "text/markdown" | "application/json", content, deliveryHash: hash };
+}
+
+/** The latest review, with per check results (v2.3 P4): code checks rerun here with the same library Owl uses, so
+ * their detail is exact; model checks carry pass only. Owl skips the model check when a code check fails. */
+function reviewOf(job: ContractJob, brief: Brief, codes: Order["reviews"][number]["codes"], ctx: ViewCtx): Order["reviews"][number] {
+  const complaint = codes.some((c) => c.startsWith("COMPLAINT_"));
+  const passed = codes.includes("PASS");
+  const delivery = job.delivery_hash ? ctx.blob(job.delivery_hash) : null;
+  const code = !complaint && delivery !== null ? runCodeChecks(brief, ctx.blob(job.input_hash) ?? "", delivery).checks : [];
+  const modelRan = code.every((c) => c.pass);
+  const model = complaint || !modelRan ? [] : brief.checklist.filter((c) => c.kind === "model").map((c) => ({ id: c.id, pass: passed || !codes.includes(MODEL_RULE_CODES[c.rule] as never) }));
+  const checks = [...code.map(({ id, pass, detail }) => ({ id, pass, detail })), ...model];
+  const reasons = (job.reasons_hash && ctx.blob(job.reasons_hash)) || (passed ? "All checks passed." : "The delivery did not pass review.");
+  return {
+    round: job.round,
+    mode: complaint ? "complaint" : "primary",
+    pass: complaint ? codes.includes("COMPLAINT_REJECTED") : passed,
+    codes,
+    reasons,
+    attestationUrl: null,
+    ...(checks.length ? { checks } : {}),
+  };
 }

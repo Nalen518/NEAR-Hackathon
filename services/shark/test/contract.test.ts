@@ -165,6 +165,7 @@ function job(id: number, over: Partial<ContractJob> = {}): ContractJob {
     complaint_until: NOW + 86_000,
     complaint_hash: null,
     codes: ["PASS"],
+    reasons_hash: null,
     review_fee: "50000",
     referral_bps: 750,
     owner_bps: 6000,
@@ -619,5 +620,34 @@ describe("files for agents (API 1.11)", () => {
     expect((await signedReq("GET", "/v1/files/sha256:x", "", strangerKey, "stranger.testnet")).status).toBe(401);
     expect((await signedReq("GET", "/v1/files/sha256:x", "", strangerKey, "owl-reviewer.testnet")).status).toBe(401);
     expect((await signedReq("GET", "/v1/files/sha256:x", "", owlKey, "owl-reviewer.testnet", NOW - 301)).status).toBe(401);
+  });
+});
+
+describe("B2: per check review results", () => {
+  it("code checks carry their detail, model checks pass only, and Owl's reasons show", async () => {
+    const q = await parsed(Quote402, await post("/v1/orders", order()));
+    const delivery = "NEAR Intents lets people swap across chains, and the fees stay low for everyone who uses them every day.";
+    store.putBlob("sha256:d", delivery);
+    store.putBlob("sha256:r", "Short, faithful and mentions both terms.");
+    job(42, { quote_id: q.quoteId, input_hash: q.input.inputHash, reasons_hash: "sha256:r" });
+    const o = await parsed(OrderPayer, await post("/v1/orders/j_000042/view", await signed("view", "j_000042")));
+    expect(o.reviews[0].checks).toEqual([
+      { id: "C1", pass: true, detail: "19 words" },
+      { id: "C2", pass: true, detail: "both found" },
+      { id: "C3", pass: true, detail: "en" },
+      { id: "M1", pass: true },
+      { id: "M2", pass: true },
+    ]);
+    expect(o.reviews[0].reasons).toBe("Short, faithful and mentions both terms.");
+  });
+  it("a failed model check shows as failed; a failed code check hides the model checks", async () => {
+    const q = await parsed(Quote402, await post("/v1/orders", order()));
+    store.putBlob("sha256:d", "NEAR Intents and fees are mentioned in this short summary of the article.");
+    job(42, { quote_id: q.quoteId, input_hash: q.input.inputHash, state: "revision", codes: ["FAIL_FAITHFULNESS"] });
+    const a = await parsed(Order, await get("/v1/orders/j_000042"));
+    expect(a.reviews[0].checks?.filter((c) => c.id.startsWith("M"))).toEqual([{ id: "M1", pass: false }, { id: "M2", pass: true }]);
+    store.putBlob("sha256:d", "Too short.");
+    const b = await parsed(Order, await get("/v1/orders/j_000042"));
+    expect(b.reviews[0].checks?.map((c) => c.id)).toEqual(["C1", "C2", "C3"]);
   });
 });

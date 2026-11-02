@@ -3,7 +3,7 @@
 // `detail` is UI copy: at most 40 characters, no semicolons or dashes (D-170).
 import { weightedLength, type Brief } from "@shark/shared";
 
-export type ReviewCode = "FAIL_FORMAT" | "FAIL_SCHEMA" | "FAIL_LENGTH" | "FAIL_MISSING_ITEM" | "FAIL_TRACEABILITY" | "FAIL_SAFETY";
+export type ReviewCode = "FAIL_FORMAT" | "FAIL_SCHEMA" | "FAIL_LENGTH" | "FAIL_MISSING_ITEM" | "FAIL_TRACEABILITY" | "FAIL_FAITHFULNESS" | "FAIL_OFF_TOPIC" | "FAIL_SAFETY";
 export type CheckResult = { id: string; pass: boolean; detail: string; code?: ReviewCode };
 export type CodeChecks = { checks: CheckResult[]; codes: ReviewCode[] };
 
@@ -149,3 +149,12 @@ export function runCodeChecks(brief: Brief, source: string, delivery: string): C
 function finish(checks: CheckResult[]): CodeChecks {
   return { checks, codes: [...new Set(checks.flatMap((c) => (c.code ? [c.code] : [])))] };
 }
+
+/** Which fail code a failed model check (kind "model") reports. Owl reports it and Shark reads it back. */
+export const MODEL_RULE_CODES: Record<string, ReviewCode> = {
+  "every claim is supported by the source": "FAIL_FAITHFULNESS",
+  "covers the source's main point": "FAIL_MISSING_ITEM",
+  "on topic": "FAIL_OFF_TOPIC",
+  "no invented facts": "FAIL_FAITHFULNESS",
+  "no invented records": "FAIL_FAITHFULNESS",
+};

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",
+    "@shark/checks": "workspace:*",
     "@shark/shared": "workspace:*",
     "hono": "4.13.13",
     "near-api-js": "7.3.1",

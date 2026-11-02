@@ -43,6 +43,16 @@ export function agentRoutes(app: Hono, d: { config: Config; chain: Chain; store:
     return c.text(text);
   });
 
+  /** Owl reads the customer's order text to judge a complaint (brief vs order, FR-51). The text is not on chain. */
+  app.get("/v1/agent/orders/:id", async (c) => {
+    const account = await agent(c, "");
+    if (account !== d.config.agents.owl) throw new HttpError(403, "not_payer", "Only the reviewer reads order text.");
+    const job = await d.chain.job(Number(c.req.param("id")));
+    const row = job && d.store.quote(job.quote_id);
+    if (!row) throw new HttpError(404, "order_not_found", "There is no job with that number.");
+    return c.json({ instructions: row.instructions });
+  });
+
   /** Workers store a delivery; the answer is its hash, which they pass to `deliver` on chain. */
   app.put("/v1/files", async (c) => {
     const body = await c.req.text();
