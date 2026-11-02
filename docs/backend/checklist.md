@@ -9,6 +9,9 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 
 Last updated: 2 Nov 2026 (after `fd56a27`)
 
+## Resume here (next session)
+Start at "Next" item 2: disputes and Unresolved in the contract (FR-44 to FR-46), then the Shark loop and timeline for them. Tests at the last commit: Shark 59, agents 16, checks 12, shared 25, web 47, contract 22. Nothing is deployed and nothing is pushed.
+
 ## A. Must (the web goes live on these)
 
 | Item | Status | Where | Notes |
