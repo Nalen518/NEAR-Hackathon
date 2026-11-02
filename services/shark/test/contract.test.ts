@@ -3,7 +3,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, ComplaintAccepted, Health, Order, OrderAccepted, OrderPayer, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult } from "@shark/shared";
+import { ApiError, Company, ComplaintAccepted, Health, Order, OrderAccepted, OrderPayer, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult } from "@shark/shared";
 import { KeyPair, KeyPairSigner } from "near-api-js";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
@@ -27,6 +27,9 @@ const config = loadConfig({
   TESTNET_X402_FACILITATOR_URL: "http://localhost:8787/x402",
   SHARK_QUOTE_KEY: quoteKey.toString(),
   RATE_LIMIT_PER_MIN: "1000",
+  TESTNET_CRAB_ID: "crab-worker.testnet",
+  TESTNET_RAVEN_ID: "raven-worker.testnet",
+  TESTNET_OWL_ID: "owl-reviewer.testnet",
 });
 
 // SRD §8.7 testnet numbers
@@ -60,7 +63,15 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   serviceState: async () => "ok",
   config: async () => contractConfig,
   priceFloor: async (t) => floors[t],
-  workers: async () => [{ id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], suspended: false }],
+  workers: async () => [
+    { id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], jobs: 4, first_pass: 3, final_fails: 1, late: 0, suspended: false },
+    { id: "raven-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["140000", "80000", "180000"], jobs: 0, first_pass: 0, final_fails: 0, late: 0, suspended: false },
+  ],
+  reviewer: async () => ({ id: "owl-reviewer.testnet", reviews: 5, overturned: 0, suspended: false }),
+  stats: async () => ({ jobs: jobs.size, strikes: 1, reserve: "16460000", owner_accrued: "195000", accounted: "0" }),
+  roles: async () => ({ owner: "sharkco.testnet", guardian: "guardian.sharkco.testnet", shark: "shark.sharkco.testnet", usdc: USDC, network: "near:testnet" }),
+  jobs: async (from, limit) => [...jobs.values()].filter((j) => j.id >= from).slice(0, limit),
+  usdcBalance: async () => "3100000",
   job: async (id) => jobs.get(id) ?? null,
   jobByQuote: async (q) => (paidQuotes.has(q) ? (jobs.get(paidQuotes.get(q)!) ?? null) : null),
   accountExists: async (id) => accessKeys.has(id) || id === "ref-agent.testnet",
@@ -160,6 +171,25 @@ describe("A1: read endpoints", () => {
   it("prices parse with bands and floors from the contract", async () => {
     const body = await parsed(Prices, await get("/v1/prices"));
     expect(body.types.summary).toEqual({ band: { min: "0.20", max: "1.00" }, floor: "0.12" });
+  });
+});
+
+describe("A1 and B4: GET /v1/company", () => {
+  it("parses as Company from contract views, with sample only where there is no live source", async () => {
+    job(1, { state: "finalized" });
+    job(2, { state: "refunded", codes: ["FAIL_LENGTH"], worker_fee: "0" });
+    const c = await parsed(Company, await get("/v1/company"));
+    expect(c.strikes).toEqual({ count: 1, threshold: 3 });
+    expect(c.reserve).toMatchObject({ balance: "16.46", floor: "12.10", sharkWallet: "3.10", dailyBudget: "4.00" });
+    expect(c.workers.map((w) => [w.id, w.payoutChain, w.firstPassPct])).toEqual([["crab", "near", 75], ["raven", "base", 0]]);
+    expect(c.workers[0].minFee).toEqual({ extract: "0.10", summary: "0.06", thread: "0.12" });
+    expect(c.reviewer).toMatchObject({ id: "owl", account: "owl-reviewer.testnet", reviews: 5, reviewFee: "0.05" });
+    expect(c.pnl7d).toMatchObject({ jobs: 2, revenue: "0.60", workers: "0.18", reviews: "0.05", referrals: "0.045", profit: "0.325", ownersAccrued: "0.195" });
+    // newest first; finalized carries the reserve delta, refunded the refund
+    expect(c.recentJobs.map((j) => [j.orderId, j.status, j.reserveDelta, j.refund])).toEqual([["j_000002", "refunded", null, "0.60"], ["j_000001", "finalized", "0.36", null]]);
+    expect(c.config).toMatchObject({ workerCapBps: 5000, reserveFloor: "12.10", complaintWindowSecs: 86400, bands: { summary: { min: "0.20", max: "1.00" } } });
+    expect(c.owners).toMatchObject({ dao: "sharkco.testnet", ownersWaiting: "0.195" });
+    expect(c.sample).toMatchObject({ strikes: false, reserve: false, workers: false, recentJobs: false, owners: true, payouts: true });
   });
 });
 

@@ -51,7 +51,10 @@ export type ContractJob = {
   owner_bps: number;
 };
 
-export type ContractWorker = { id: string; types: JobType[]; min_fees: string[]; suspended: boolean };
+export type ContractWorker = { id: string; types: JobType[]; min_fees: string[]; jobs: number; first_pass: number; final_fails: number; late: number; suspended: boolean };
+export type ContractReviewer = { id: string; reviews: number; overturned: number; suspended: boolean };
+export type ContractStats = { jobs: number; strikes: number; reserve: string; owner_accrued: string; accounted: string };
+export type ContractRoles = { owner: string; guardian: string; shark: string; usdc: string; network: string };
 
 /** NEP-413 `signMessage` output (API §1.5a), nonce and signature base64. */
 export type Nep413 = { accountId: string; publicKey: string; signature: string; message: string; nonce: string; recipient: string };
@@ -61,6 +64,12 @@ export type Chain = {
   config(): Promise<ContractConfig>;
   priceFloor(type: JobType): Promise<string>;
   workers(): Promise<ContractWorker[]>;
+  reviewer(): Promise<ContractReviewer | null>;
+  stats(): Promise<ContractStats>;
+  roles(): Promise<ContractRoles>;
+  /** Jobs with ids from `from`, oldest first, at most `limit` (≤ 100). */
+  jobs(from: number, limit: number): Promise<ContractJob[]>;
+  usdcBalance(account: string): Promise<string>;
   job(id: number): Promise<ContractJob | null>;
   jobByQuote(quoteId: string): Promise<ContractJob | null>;
   accountExists(id: string): Promise<boolean>;
@@ -84,6 +93,11 @@ export function rpcChain(opts: { rpcUrl: string; contractId: string; usdcId: str
     config: () => view<ContractConfig>("get_config"),
     priceFloor: (type) => view<string>("get_price_floor", { job_type: type }),
     workers: () => view<ContractWorker[]>("get_workers"),
+    reviewer: () => view<ContractReviewer | null>("get_reviewer"),
+    stats: () => view<ContractStats>("get_stats"),
+    roles: () => view<ContractRoles>("get_roles"),
+    jobs: (from, limit) => view<ContractJob[]>("get_jobs", { from, limit }),
+    usdcBalance: (account) => view<string>("ft_balance_of", { account_id: account }, opts.usdcId),
     job: (id) => view<ContractJob | null>("get_job", { job: id }),
     jobByQuote: (quoteId) => view<ContractJob | null>("get_job_by_quote", { quote_id: quoteId }),
     accountExists: (id) =>

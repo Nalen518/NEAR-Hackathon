@@ -183,6 +183,15 @@ pub struct ReviewResult {
 }
 
 #[near(serializers = [json])]
+pub struct Roles {
+    pub owner: AccountId,
+    pub guardian: AccountId,
+    pub shark: AccountId,
+    pub usdc: AccountId,
+    pub network: String,
+}
+
+#[near(serializers = [json])]
 pub struct Stats {
     pub jobs: u64,
     pub strikes: u8,
@@ -625,6 +634,10 @@ impl Contract {
 
     pub fn get_quote_pubkey(&self) -> PublicKey {
         self.quote_pubkey.clone()
+    }
+
+    pub fn get_roles(&self) -> Roles {
+        Roles { owner: self.owner.clone(), guardian: self.guardian.clone(), shark: self.shark.clone(), usdc: self.usdc.clone(), network: self.network.clone() }
     }
 }
 

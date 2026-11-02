@@ -351,3 +351,10 @@ fn job_by_quote_finds_the_paid_job() {
     assert_eq!(c.get_job_by_quote("q_A".into()).unwrap().id, 1);
     assert!(c.get_job_by_quote("q_B".into()).is_none());
 }
+
+#[test]
+fn roles_view() {
+    let c = setup();
+    let r = c.get_roles();
+    assert_eq!((r.owner.as_str(), r.guardian.as_str(), r.shark.as_str(), r.network.as_str()), ("dao.testnet", "guardian.testnet", "shark.testnet", NET));
+}

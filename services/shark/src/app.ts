@@ -1,8 +1,9 @@
 // Shark HTTP API `/v1/*` (API-CONTRACT v2.3 §1). Every response states this host's network (§0.3 N1).
-import { fromBase, JobType, type PaymentOptions, type Prices } from "@shark/shared";
+import type { PaymentOptions } from "@shark/shared";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Chain } from "./chain";
+import { companyOf, pricesOf } from "./company";
 import type { Config } from "./config";
 import { HttpError, sendError } from "./errors";
 import { orderRoutes } from "./orders";
@@ -49,19 +50,9 @@ export function createApp({ config, chain, store, now = () => Math.floor(Date.no
     c.json({ ok: true, network: config.networkId, state: await serviceState(), contract: config.contractId, version: config.version }),
   );
 
-  app.get("/v1/prices", async (c) => {
-    const cfg = await chain.config();
-    const floors = await Promise.all(JobType.options.map((t) => chain.priceFloor(t)));
-    const types = Object.fromEntries(
-      JobType.options.map((t, i) => [
-        t,
-        { band: { min: fromBase(BigInt(cfg[t].band_min)), max: fromBase(BigInt(cfg[t].band_max)) }, floor: fromBase(BigInt(floors[i])) },
-      ]),
-    ) as Prices["types"];
-    // shortcut: recentQuotes stays empty until quotes are stored (POST /v1/orders)
-    const body: Prices & { network: string } = { network: config.networkId, types, recentQuotes: [] };
-    return c.json(body);
-  });
+  app.get("/v1/prices", async (c) => c.json({ network: config.networkId, ...(await pricesOf(chain)) }));
+
+  app.get("/v1/company", async (c) => c.json(await companyOf(config, chain, now())));
 
   app.get("/v1/payment-options", (c) => {
     const options: PaymentOptions["options"] = [
