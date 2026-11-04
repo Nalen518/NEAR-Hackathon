@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start:crab": "tsx --env-file=.env.crab src/index.ts",
+    "start:raven": "tsx --env-file=.env.raven src/index.ts",
+    "start:owl": "tsx --env-file=.env.owl src/index.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",

@@ -69,7 +69,7 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 | 8 | Rust port of the code checks, for Owl in the OutLayer TEE (NFR-02) | ✅ `a87a732` (`owl/checks`, 20 shared fixtures in `fixtures/checks`) |
 
 ## Later: needs a wallet 🔒 or NEAR AI 🧠
-- 🔒 Testnet deploy: contract init (`new` now takes the Shark wallet account), fund the contract with a little NEAR, register workers and Owl, USDC storage registrations, reserve seed, agent keys, then A12.
+- 🔒 Testnet deploy: **runbook ready in `docs/backend/DEPLOY-TESTNET.md`** (helper scripts: `contracts/deploy/plan.mjs`, `services/shark/scripts/make-key.mjs` and `order.mjs`; none of them signs). Contract init (`new` now takes the Shark wallet account), fund the contract with a little NEAR, register workers and Owl, USDC storage registrations, reserve seed, agent keys, then A12.
 - 🔒 Run our facilitator (`services/facilitator`): create and fund the relayer account (`x402-relayer.sharkco.testnet`), set `X402_RELAYER_KEY` and `X402_API_KEY`, point Shark's `TESTNET_X402_FACILITATOR_URL` at it. Or use FastNEAR's (needs an API key, requested by a GitHub issue, reviewed by hand).
 - x402 with FastNEAR's hosted facilitator instead of ours: confirm its `/openapi.yaml` uses the same keys as `@x402/core` (`x402Version`, `paymentPayload`, `paymentRequirements`). Ours is checked against the library's types.
 - 🧠 Running Crab, Raven and Owl for real (built and tested with a fake model in `a37ad08`). Pick models (O-06).

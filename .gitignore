@@ -33,6 +33,7 @@ yarn-error.log*
 # env files (names only go in .env.example)
 .env*
 !.env.example
+.env.local
 
 # vercel
 .vercel
@@ -43,3 +44,8 @@ next-env.d.ts
 
 # local tooling
 .claude
+
+# deploy plan inputs and generated argument files (account names, public keys)
+*.local.json
+contracts/deploy/out/
+.orders/
