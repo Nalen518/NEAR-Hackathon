@@ -13,6 +13,7 @@ export type LoopDeps = { config: Config; chain: Chain; store: Store; now: () => 
 
 const RFQ_TIMEOUT_MS = 20_000; // FR-31
 const LATE_GRACE_SECS = 60;
+const ESCROW_RETRY_SECS = 120;
 const OPEN = new Set<ContractJob["state"]>(["paid", "awarded", "review", "revision", "failed", "dispute_review", "unresolved", "delivered", "complaint_review", "refund_due"]);
 
 type Bid = { workerId: string; jobId: string; price: string; etaSecs: number; expiry: string; pubKey: string; sig: string };
@@ -87,9 +88,12 @@ async function step(d: LoopDeps, job: ContractJob) {
     }
     case "awarded":
       if (late) return void (await chain.expireWork(job.id));
-      if (row && !job.escrowed && !row.escrow_tx) {
+      // Sent but still not escrowed on chain after a while: the contract gave the USDC back (an empty wallet, say), so send it
+      // again. A second escrow of a job that is escrowed is refused by the contract and the token returns it.
+      if (row && !job.escrowed && (!row.escrow_tx || now() > (row.escrow_at ?? row.at) + ESCROW_RETRY_SECS)) {
         const reviewFee = BigInt(job.review_fee);
         row.escrow_tx = await chain.escrow(job.id, (BigInt(job.worker_fee) + reviewFee).toString());
+        row.escrow_at = now();
         store.putAuction(row);
       }
       if (row && job.escrowed && row.round_sent < 1) await notify(d, job, row, 1);

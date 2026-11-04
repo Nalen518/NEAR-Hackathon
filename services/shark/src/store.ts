@@ -35,6 +35,8 @@ export type AuctionRow = {
   bid_hash: string | null;
   award_tx: string | null;
   escrow_tx: string | null;
+  /** When the escrow was last sent (unix seconds); older rows have none */
+  escrow_at?: number;
   round_sent: number;
   at: number;
   /** This is the second auction, after the first worker was late (FR-35) */
@@ -57,6 +59,8 @@ export function openStore(dir: string) {
     create index if not exists receipts_job on receipts(job);
     create index if not exists receipts_quote on receipts(quote);
   `);
+  // a signature older than 5 minutes is refused anyway, so a day-old nonce guards nothing
+  db.prepare("delete from payer_nonces where at < ?").run(Math.floor(Date.now() / 1000) - 86_400);
   type ReceiptRow = Omit<StoredReceipt, "ok" | "args"> & { ok: number; args: string };
   const toReceipt = (r: ReceiptRow): StoredReceipt => ({ ...r, ok: !!r.ok, args: JSON.parse(r.args) });
   const blob = (hash: string) => join(dir, "files", hash.replace(/^sha256:/, ""));
@@ -116,6 +120,12 @@ export function openStore(dir: string) {
       (db.prepare(`select * from receipts where ok = 1 and method in (${methods.map(() => "?").join(",")}) order by at desc, rowid desc limit ?`).all(...methods, limit) as ReceiptRow[]).map(toReceipt),
     kv: (key: string) => (db.prepare("select value from kv where key = ?").get(key) as { value: string } | undefined)?.value ?? null,
     setKv: (key: string, value: string) => db.prepare("insert or replace into kv values (?, ?)").run(key, value),
+    /** Forgets the "first seen" notes under `prefix` for things that are no longer true (a paid refund, a retried payout) */
+    keepSeen: (prefix: string, keep: (string | number)[]) => {
+      const live = new Set(keep.map((k) => `${prefix}${k}`));
+      for (const { key } of db.prepare("select key from kv where key like ?").all(`${prefix}%`) as { key: string }[])
+        if (!live.has(key)) db.prepare("delete from kv where key = ?").run(key);
+    },
     putAuction: (a: AuctionRow) => db.prepare("insert or replace into auctions values (?, ?)").run(a.job_id, JSON.stringify(a)),
     auction: (jobId: number): AuctionRow | undefined => {
       const r = db.prepare("select row from auctions where job_id = ?").get(jobId) as { row: string } | undefined;

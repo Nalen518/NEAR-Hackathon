@@ -1380,3 +1380,42 @@ describe("a suspended worker without a suspend call (review 6)", () => {
     expect(await at(NOW + 3_000)).toEqual([["worker_suspended", first]]);
   });
 });
+
+describe("housekeeping and a lost escrow (review 10 and 12)", () => {
+  it("sends the escrow again when it never arrived, but not before two minutes, and stops once escrowed", async () => {
+    job(1, unawarded);
+    await tick(loopDeps({ "http://crab.local": crab }));
+    job(1, { ...jobs.get(1)!, state: "awarded", worker: "crab-worker.testnet", worker_fee: "180000", escrowed: false, awarded_at: NOW, work_deadline: NOW + 600 });
+    const at = async (now: number, chain = fakeChain()) => tick({ ...loopDeps({ "http://crab.local": crab }, [], chain), now: () => now });
+    await at(NOW);
+    expect(txs.filter((t) => t.startsWith("escrow"))).toEqual(["escrow 1 230000"]);
+    await at(NOW + 100); // too soon
+    expect(txs.filter((t) => t.startsWith("escrow"))).toHaveLength(1);
+    await at(NOW + 121); // the first one never showed up on chain
+    expect(txs.filter((t) => t.startsWith("escrow"))).toHaveLength(2);
+    job(1, { ...jobs.get(1)!, escrowed: true });
+    await at(NOW + 300);
+    expect(txs.filter((t) => t.startsWith("escrow"))).toHaveLength(2);
+  });
+
+  it("forgets first sightings that are no longer true, and keeps the ones that are", async () => {
+    store.setKv("owed_seen:1", "100");
+    store.setKv("owed_seen:2", "200");
+    store.setKv("refund_seen:7", "300");
+    store.setKv("other", "x");
+    store.keepSeen("owed_seen:", [2]);
+    store.keepSeen("refund_seen:", []);
+    expect([store.kv("owed_seen:1"), store.kv("owed_seen:2"), store.kv("refund_seen:7"), store.kv("other")]).toEqual([null, "200", null, "x"]);
+  });
+
+  it("drops nonces older than a day when the store opens", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shark-nonce-"));
+    const first = openStore(dir);
+    const old = Math.floor(Date.now() / 1000) - 2 * 86_400;
+    expect(first.useNonce("old", old, "view:a:j_000001", false)).toBe(true);
+    expect(first.useNonce("fresh", Math.floor(Date.now() / 1000), "view:a:j_000001", false)).toBe(true);
+    const again = openStore(dir);
+    expect(again.useNonce("old", Math.floor(Date.now() / 1000), "view:a:j_000001", false)).toBe(true); // gone, so usable again
+    expect(again.useNonce("fresh", Math.floor(Date.now() / 1000), "view:a:j_000001", false)).toBe(false); // still known
+  });
+});

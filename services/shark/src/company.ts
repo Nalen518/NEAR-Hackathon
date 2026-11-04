@@ -168,6 +168,9 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
   });
 
   const nameOf = (account: string) => (account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : account === config.agents.owl ? "owl" : account);
+  const owedOpen = owed.map((o) => o.id);
+  const refundDue = jobs.filter((j) => j.state === "refund_due").map((j) => j.id);
+  const suspended = workers.filter((w) => w.suspended).map((w) => w.id);
   const incidents = incidentsOf({
     now,
     threshold: cfg.strike_threshold,
@@ -175,10 +178,14 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
     workers,
     receipts: store.recentReceipts(["on_review", "reset_strikes", "expire_work", "mark_unresolved", "suspend"], 500).reverse(),
     owed: owed.map((entry) => ({ entry, seenAt: firstSeen(store, `owed_seen:${entry.id}`, now) })),
-    refundSeen: new Map(jobs.filter((j) => j.state === "refund_due").map((j) => [j.id, firstSeen(store, `refund_seen:${j.id}`, now)])),
-    suspendedSeen: new Map(workers.filter((w) => w.suspended).map((w) => [w.id, firstSeen(store, `suspended_seen:${w.id}`, now)])),
+    refundSeen: new Map(refundDue.map((id) => [id, firstSeen(store, `refund_seen:${id}`, now)])),
+    suspendedSeen: new Map(suspended.map((id) => [id, firstSeen(store, `suspended_seen:${id}`, now)])),
     nameOf,
   });
+  // what is paid, retried or reinstated is forgotten, so a second time starts from its own first sighting
+  store.keepSeen("owed_seen:", owedOpen);
+  store.keepSeen("refund_seen:", refundDue);
+  store.keepSeen("suspended_seen:", suspended);
 
   // payouts from the calls that made them, newest first; fees held for an Unresolved job show as held
   const madePayouts: Payout[] = store.recentReceipts(["on_review", "pay_refund", "release_unresolved", "finalize"], 60).flatMap((r) => {
