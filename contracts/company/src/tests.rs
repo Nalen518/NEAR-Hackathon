@@ -50,7 +50,7 @@ fn config() -> Config {
 fn setup() -> Contract {
     ctx("deployer.testnet", 1_000);
     let pk = PublicKey::from_parts(CurveType::ED25519, key().verifying_key().to_bytes().to_vec()).unwrap();
-    let mut c = Contract::new(acc("dao.testnet"), acc("guardian.testnet"), acc("shark.testnet"), pk, usdc(), NET.into(), config());
+    let mut c = Contract::new(acc("dao.testnet"), acc("guardian.testnet"), acc("shark.testnet"), acc("wallet.testnet"), pk, usdc(), NET.into(), config());
     ctx("dao.testnet", 1_000);
     c.register_worker(acc("crab.testnet"), vec![JobType::Extract, JobType::Summary, JobType::Thread], vec![U128(100_000), U128(60_000), U128(120_000)]);
     c.register_reviewer(acc("owl.testnet"));
@@ -94,7 +94,7 @@ fn delivered_job(c: &mut Contract) -> u64 {
     ctx("shark.testnet", 1_010);
     c.award(1, acc("crab.testnet"), U128(180_000), "sha256:bid".into(), "sha256:why".into());
     ctx(usdc().as_str(), 1_011);
-    let _ = c.ft_on_transfer(acc("shark.testnet"), U128(230_000), "escrow:1".into());
+    let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(230_000), "escrow:1".into());
     ctx("crab.testnet", 1_100);
     c.deliver(1, "sha256:d".into());
     1
@@ -207,7 +207,7 @@ fn escrow_must_be_fee_plus_review_fee() {
     ctx("shark.testnet", 1_010);
     c.award(1, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
     ctx(usdc().as_str(), 1_011);
-    let _ = c.ft_on_transfer(acc("shark.testnet"), U128(180_000), "escrow:1".into());
+    let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(180_000), "escrow:1".into());
 }
 
 #[test]
@@ -269,7 +269,7 @@ fn three_upheld_complaints_cage_shark() {
         ctx("shark.testnet", 1_010);
         c.award(id, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
         ctx(usdc().as_str(), 1_011);
-        let _ = c.ft_on_transfer(acc("shark.testnet"), U128(230_000), format!("escrow:{id}"));
+        let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(230_000), format!("escrow:{id}"));
         ctx("crab.testnet", 1_100);
         c.deliver(id, "sha256:d".into());
         review(&mut c, id, "primary", true, &["PASS"], 1_200);
@@ -343,7 +343,7 @@ fn job_by_quote_finds_the_paid_job() {
 fn roles_view() {
     let c = setup();
     let r = c.get_roles();
-    assert_eq!((r.owner.as_str(), r.guardian.as_str(), r.shark.as_str(), r.network.as_str()), ("dao.testnet", "guardian.testnet", "shark.testnet", NET));
+    assert_eq!((r.owner.as_str(), r.guardian.as_str(), r.shark.as_str(), r.shark_wallet.as_str(), r.network.as_str()), ("dao.testnet", "guardian.testnet", "shark.testnet", "wallet.testnet", NET));
 }
 
 // ---------- disputes and Unresolved (FR-44 to FR-47) ----------
@@ -354,7 +354,7 @@ fn failed_job(c: &mut Contract, id: u64, qid: &str) {
     ctx("shark.testnet", 1_010);
     c.award(id, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
     ctx(usdc().as_str(), 1_011);
-    let _ = c.ft_on_transfer(acc("shark.testnet"), U128(230_000), format!("escrow:{id}"));
+    let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(230_000), format!("escrow:{id}"));
     ctx("crab.testnet", 1_100);
     c.deliver(id, "sha256:d".into());
     review(c, id, "primary", false, &["FAIL_LENGTH"], 1_200);
@@ -547,4 +547,234 @@ fn final_fails_and_lost_disputes_suspend_the_worker() {
     assert!(!c.get_workers()[0].suspended);
     c.settle_failed(3);
     assert!(c.get_workers()[0].suspended);
+}
+
+// ---------- treasury, wind-down, re-auction, owed ledger ----------
+
+const DAY: u64 = 86_400;
+
+#[test]
+#[should_panic(expected = "E_UNAUTHORIZED")]
+fn only_the_shark_wallet_can_escrow() {
+    let mut c = setup();
+    pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    ctx("shark.testnet", 1_010);
+    c.award(1, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+    ctx(usdc().as_str(), 1_011);
+    let _ = c.ft_on_transfer(acc("shark.testnet"), U128(230_000), "escrow:1".into()); // the key account is not the wallet
+}
+
+#[test]
+fn fund_shark_pays_the_daily_budget_above_the_floor_once_a_day() {
+    let mut c = setup();
+    seed_reserve(&mut c, 20_000_000); // floor is 3 x 4.00 + 2 x 0.05 = 12.10
+    ctx("anyone.testnet", 10 * DAY);
+    c.fund_shark();
+    let s = c.get_stats();
+    assert_eq!((s.reserve.0, s.accounted.0), (16_000_000, 16_000_000));
+    // the next day it is capped by what is left above the floor
+    ctx("anyone.testnet", 11 * DAY);
+    c.fund_shark();
+    assert_eq!(c.get_stats().reserve.0, 12_100_000 + 0); // 16.00 - min(4.00, 3.90) = 12.10
+}
+
+#[test]
+#[should_panic(expected = "E_ONCE_PER_DAY")]
+fn fund_shark_only_once_per_utc_day() {
+    let mut c = setup();
+    seed_reserve(&mut c, 30_000_000);
+    ctx("anyone.testnet", 10 * DAY);
+    c.fund_shark();
+    ctx("anyone.testnet", 10 * DAY + 3_600);
+    c.fund_shark();
+}
+
+#[test]
+#[should_panic(expected = "E_RESERVE_FLOOR")]
+fn fund_shark_never_goes_below_the_floor() {
+    let mut c = setup();
+    seed_reserve(&mut c, 12_100_000);
+    ctx("anyone.testnet", 10 * DAY);
+    c.fund_shark();
+}
+
+#[test]
+fn open_jobs_are_counted_until_they_finish() {
+    let mut c = setup();
+    let id = delivered_job(&mut c);
+    assert_eq!(c.get_stats().open_jobs, 1);
+    review(&mut c, id, "primary", true, &["PASS"], 1_200);
+    ctx("anyone.testnet", 1_200 + 86_401);
+    c.finalize(id);
+    assert_eq!(c.get_stats().open_jobs, 0);
+}
+
+#[test]
+fn owners_are_paid_only_while_the_reserve_is_at_the_floor() {
+    let mut c = setup();
+    let id = delivered_job(&mut c);
+    review(&mut c, id, "primary", true, &["PASS"], 1_200);
+    ctx("anyone.testnet", 1_200 + 86_401);
+    c.finalize(id);
+    assert_eq!(c.get_stats().owner_accrued.0, 195_000);
+    let before = c.get_stats().accounted.0;
+    seed_reserve(&mut c, 12_100_000);
+    ctx("anyone.testnet", 1_200 + 86_402);
+    c.pay_owners();
+    let s = c.get_stats();
+    assert_eq!((s.owner_accrued.0, s.accounted.0), (0, before + 12_100_000 - 195_000));
+}
+
+#[test]
+#[should_panic(expected = "E_RESERVE_FLOOR")]
+fn owners_wait_while_the_reserve_is_below_the_floor() {
+    let mut c = setup();
+    let id = delivered_job(&mut c);
+    review(&mut c, id, "primary", true, &["PASS"], 1_200);
+    ctx("anyone.testnet", 1_200 + 86_401);
+    c.finalize(id);
+    c.pay_owners();
+}
+
+#[test]
+fn wind_down_sends_everything_to_the_dao_and_closes() {
+    let mut c = setup();
+    seed_reserve(&mut c, 5_000_000);
+    ctx("guardian.testnet", 2_000);
+    c.pause();
+    ctx("dao.testnet", 2_001);
+    c.wind_down();
+    let s = c.get_stats();
+    assert_eq!((s.accounted.0, s.reserve.0), (0, 0));
+    assert_eq!(c.get_service_state(), "closed");
+    assert_eq!(pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000), 600_000);
+}
+
+#[test]
+#[should_panic(expected = "E_OPEN_JOBS")]
+fn wind_down_waits_for_open_jobs() {
+    let mut c = setup();
+    pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    ctx("guardian.testnet", 2_000);
+    c.pause();
+    ctx("dao.testnet", 2_001);
+    c.wind_down();
+}
+
+#[test]
+#[should_panic(expected = "E_PAUSED")]
+fn wind_down_needs_a_pause_first() {
+    let mut c = setup();
+    ctx("dao.testnet", 2_000);
+    c.wind_down();
+}
+
+#[test]
+#[should_panic(expected = "E_UNAUTHORIZED")]
+fn only_the_dao_winds_down() {
+    let mut c = setup();
+    ctx("guardian.testnet", 2_000);
+    c.pause();
+    c.wind_down();
+}
+
+fn two_workers() -> Contract {
+    let mut c = setup();
+    ctx("dao.testnet", 1_000);
+    c.register_worker(acc("raven.testnet"), vec![JobType::Summary], vec![U128(80_000)]);
+    c
+}
+
+fn awarded_to(c: &mut Contract, worker: &str, at: u64) {
+    ctx("shark.testnet", at);
+    c.award(1, acc(worker), U128(180_000), "h".into(), "h".into());
+    ctx(usdc().as_str(), at + 1);
+    let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(230_000), "escrow:1".into());
+}
+
+#[test]
+fn a_late_worker_loses_the_job_to_one_re_auction_and_cannot_win_it_again() {
+    let mut c = two_workers();
+    pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    awarded_to(&mut c, "crab.testnet", 1_010); // deadline 1_610
+    ctx("anyone.testnet", 1_610);
+    let early = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.expire_work(1)));
+    assert!(early.is_err(), "not late until after the deadline");
+    ctx("anyone.testnet", 1_611);
+    c.expire_work(1);
+    let j = c.get_job(1).unwrap();
+    assert_eq!((j.state, j.worker.is_none(), j.escrowed, j.reauctioned), (JobState::Paid, true, false, true));
+    assert_eq!(j.excluded.unwrap().as_str(), "crab.testnet");
+    assert_eq!(c.get_workers().iter().find(|w| w.id.as_str() == "crab.testnet").unwrap().late, 1);
+    assert_eq!(c.get_stats().accounted.0, 600_000); // the escrow went back to Shark's wallet
+    // the second worker takes it, is late too: this time the payer is refunded
+    awarded_to(&mut c, "raven.testnet", 1_700);
+    ctx("anyone.testnet", 2_301);
+    c.expire_work(1);
+    assert_eq!(c.get_job(1).unwrap().state, JobState::RefundDue);
+}
+
+#[test]
+#[should_panic(expected = "E_NOT_ELIGIBLE")]
+fn the_late_worker_cannot_be_awarded_again() {
+    let mut c = two_workers();
+    pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    awarded_to(&mut c, "crab.testnet", 1_010);
+    ctx("anyone.testnet", 1_611);
+    c.expire_work(1);
+    ctx("shark.testnet", 1_700);
+    c.award(1, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+}
+
+#[test]
+fn a_late_revision_is_refunded_not_re_auctioned() {
+    let mut c = setup();
+    let id = delivered_job(&mut c);
+    review(&mut c, id, "primary", false, &["FAIL_LENGTH"], 1_200); // revision, deadline 1_800
+    ctx("anyone.testnet", 1_801);
+    c.expire_work(id);
+    let j = c.get_job(id).unwrap();
+    assert_eq!((j.state, j.reauctioned, j.escrowed), (JobState::RefundDue, false, false));
+}
+
+#[test]
+fn a_failed_payout_goes_on_the_owed_ledger_and_can_be_retried() {
+    let mut c = setup();
+    let before = c.get_stats().accounted.0;
+    ctx("sharkco.testnet", 2_000); // callbacks come from the contract itself
+    c.on_payout(7, acc("crab.testnet"), U128(180_000), "worker".into(), Err(PromiseError::Failed));
+    let s = c.get_stats();
+    assert_eq!((s.accounted.0, s.owed_open), (before + 180_000, 1));
+    let owed = c.get_owed(1, 10);
+    assert_eq!((owed.len(), owed[0].job, owed[0].amount.0, owed[0].kind.as_str()), (1, 7, 180_000, "worker"));
+    ctx("anyone.testnet", 2_001);
+    c.retry_owed(1).detach();
+    let s = c.get_stats();
+    assert_eq!((s.accounted.0, s.owed_open), (before, 0));
+    assert!(c.get_owed(1, 10).is_empty());
+}
+
+#[test]
+#[should_panic(expected = "E_OPEN_JOBS")]
+fn wind_down_waits_for_owed_payouts() {
+    let mut c = setup();
+    ctx("sharkco.testnet", 2_000);
+    c.on_payout(7, acc("crab.testnet"), U128(180_000), "worker".into(), Err(PromiseError::Failed));
+    ctx("guardian.testnet", 2_001);
+    c.pause();
+    ctx("dao.testnet", 2_002);
+    c.wind_down();
+}
+
+#[test]
+fn a_failed_refund_reopens_the_job() {
+    let mut c = setup();
+    pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    ctx("shark.testnet", 1_010);
+    c.mark_refund_due(1);
+    c.pay_refund(1).detach();
+    assert_eq!((c.get_job(1).unwrap().state, c.get_stats().open_jobs), (JobState::Refunded, 0));
+    ctx("sharkco.testnet", 2_000);
+    c.on_payout(1, acc("buyer.testnet"), U128(600_000), "refund".into(), Err(PromiseError::Failed));
+    assert_eq!((c.get_job(1).unwrap().state, c.get_stats().open_jobs), (JobState::RefundDue, 1));
 }

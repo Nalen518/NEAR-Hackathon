@@ -15,6 +15,10 @@ use near_sdk::{
 
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_CALLBACK: Gas = Gas::from_tgas(10);
+const GAS_STORAGE: Gas = Gas::from_tgas(15);
+/** NEP-145 minimum for registering an account on the USDC token (API §1.2 `register`) */
+const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
+const DAY_SECS: u64 = 86_400;
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 const BPS: u128 = 10_000;
 const QUOTE_DOMAIN: &str = "sharkco:quote:v2|";
@@ -23,6 +27,7 @@ const QUOTE_DOMAIN: &str = "sharkco:quote:v2|";
 #[allow(dead_code)]
 trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
+    fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
 }
 
 #[near(serializers = [json, borsh])]
@@ -186,6 +191,10 @@ pub struct Job {
     pub unresolved_since: Option<u64>,
     /// The refund is paid but the worker fee stays in escrow (Unresolved)
     pub held: bool,
+    /// The first worker was late and the job went back to auction (FR-35); it may happen once
+    pub reauctioned: bool,
+    /// The late worker, who may not win the re-auction
+    pub excluded: Option<AccountId>,
     // snapshots (FR-73)
     pub review_fee: U128,
     pub referral_bps: u16,
@@ -203,11 +212,23 @@ pub struct ReviewResult {
     pub reasons_hash: String,
 }
 
+/// A payout whose transfer failed. The money is still in the contract; anyone may retry it (`retry_owed`).
+#[near(serializers = [json, borsh])]
+#[derive(Clone)]
+pub struct Owed {
+    pub id: u64,
+    pub job: u64,
+    pub to: AccountId,
+    pub amount: U128,
+    pub kind: String,
+}
+
 #[near(serializers = [json])]
 pub struct Roles {
     pub owner: AccountId,
     pub guardian: AccountId,
     pub shark: AccountId,
+    pub shark_wallet: AccountId,
     pub usdc: AccountId,
     pub network: String,
 }
@@ -219,6 +240,8 @@ pub struct Stats {
     pub reserve: U128,
     pub owner_accrued: U128,
     pub accounted: U128,
+    pub open_jobs: u64,
+    pub owed_open: u64,
 }
 
 #[derive(BorshStorageKey)]
@@ -227,6 +250,7 @@ enum Key {
     Jobs,
     Workers,
     UsedQuotes,
+    Owed,
 }
 
 #[near(contract_state)]
@@ -235,6 +259,8 @@ pub struct Contract {
     owner: AccountId,
     guardian: AccountId,
     shark: AccountId,
+    /// Shark's USDC wallet: the only sender of escrow, and who `fund_shark` pays (FR-34, FR-62)
+    shark_wallet: AccountId,
     quote_pubkey: PublicKey,
     usdc: AccountId,
     /// CAIP-2, e.g. "near:testnet" (API §0.3 N4)
@@ -253,6 +279,12 @@ pub struct Contract {
     owner_accrued: u128,
     /// Every USDC base unit the contract knows it holds (for balance checks of methods 2 and 3).
     accounted: u128,
+    /// Jobs not yet Finalized or Refunded; `wind_down` needs none
+    open_jobs: u64,
+    last_fund_day: u64,
+    owed: LookupMap<u64, Owed>,
+    owed_next: u64,
+    owed_open: u64,
 }
 
 fn now_secs() -> u64 {
@@ -273,6 +305,7 @@ impl Contract {
         owner: AccountId,
         guardian: AccountId,
         shark: AccountId,
+        shark_wallet: AccountId,
         quote_pubkey: PublicKey,
         usdc: AccountId,
         network: String,
@@ -283,6 +316,7 @@ impl Contract {
             owner,
             guardian,
             shark,
+            shark_wallet,
             quote_pubkey,
             usdc,
             network,
@@ -298,6 +332,11 @@ impl Contract {
             reserve: 0,
             owner_accrued: 0,
             accounted: 0,
+            open_jobs: 0,
+            last_fund_day: 0,
+            owed: LookupMap::new(Key::Owed),
+            owed_next: 1,
+            owed_open: 0,
         };
         c.check_config(&config);
         c
@@ -355,6 +394,11 @@ impl Contract {
         self.strikes = 0;
     }
 
+    pub fn set_shark_wallet(&mut self, wallet: AccountId) {
+        self.only(&self.owner.clone());
+        self.shark_wallet = wallet;
+    }
+
     pub fn set_quote_pubkey(&mut self, pk: PublicKey) {
         self.only(&self.owner.clone());
         self.quote_pubkey = pk;
@@ -396,7 +440,7 @@ impl Contract {
             };
         }
         if let Some(id) = msg.strip_prefix("escrow:") {
-            require!(sender_id == self.shark, "E_UNAUTHORIZED");
+            require!(sender_id == self.shark_wallet, "E_UNAUTHORIZED");
             let id: u64 = id.parse().unwrap_or_else(|_| env::panic_str("E_BAD_STATE"));
             let mut j = self.job(id);
             require!(j.state == JobState::Awarded && !j.escrowed, "E_BAD_STATE");
@@ -419,7 +463,7 @@ impl Contract {
         let mut j = self.job(job);
         require!(j.state == JobState::Paid, "E_BAD_STATE");
         let w = self.workers.get(&worker).unwrap_or_else(|| env::panic_str("E_UNKNOWN_AGENT"));
-        require!(!w.suspended && w.unresolved_open < self.config.max_unresolved_open, "E_NOT_ELIGIBLE");
+        require!(!w.suspended && w.unresolved_open < self.config.max_unresolved_open && j.excluded.as_ref() != Some(&worker), "E_NOT_ELIGIBLE");
         let min = w.min_fee(j.job_type).unwrap_or_else(|| env::panic_str("E_NOT_ELIGIBLE"));
         require!(fee.0 >= min, "E_BELOW_MIN_FEE");
         require!(fee.0 * BPS <= j.price.0 * self.config.worker_cap_bps as u128, "E_OVER_CAP");
@@ -520,6 +564,7 @@ impl Contract {
                 if was_unresolved {
                     let w = self.worker_mut(&worker);
                     w.unresolved_open = w.unresolved_open.saturating_sub(1);
+                    self.close_job(); // Unresolved always ends Refunded
                 }
             }
             (JobState::ComplaintReview, "complaint") => {
@@ -603,6 +648,7 @@ impl Contract {
         w.unresolved_open = w.unresolved_open.saturating_sub(1);
         j.escrowed = false;
         j.state = JobState::Refunded;
+        self.close_job();
         self.jobs.insert(job, j);
         emit("unresolved_released", json!({ "job_id": job, "worker": worker }));
     }
@@ -626,6 +672,7 @@ impl Contract {
             self.payout(&r, referral, job, "referral").detach();
         }
         j.state = JobState::Finalized;
+        self.close_job();
         self.jobs.insert(job, j);
         emit("finalized", json!({ "job_id": job, "referral": U128(referral), "owners": U128(owners), "reserve": U128(p - referral - owners) }));
     }
@@ -649,18 +696,20 @@ impl Contract {
         let mut j = self.job(job);
         require!(j.state == JobState::RefundDue, "E_BAD_STATE");
         j.state = if j.held { JobState::Unresolved } else { JobState::Refunded };
+        if !j.held {
+            self.close_job();
+        }
         let (to, amount) = (j.payer.clone(), j.price.0);
         self.jobs.insert(job, j);
         emit("refund", json!({ "job_id": job, "to": to, "amount": U128(amount), "reason": "refund_due" }));
-        self.payout(&to, amount, job, "refund")
+        self.payout_refund(&to, amount, job)
     }
 
     // ---------- payout callback ----------
 
     /// A failed transfer is never retried blindly, so nothing is paid twice. A failed refund goes back to
-    /// RefundDue for another `pay_refund` (fail to refund, never keep).
-    /// shortcut: a failed worker, reviewer or referral payout is parked in the reserve with a `payout_failed`
-    /// event; add an owed ledger with a permissionless retry before mainnet-lite.
+    /// RefundDue for another `pay_refund` (fail to refund, never keep). Any other failed payout goes on the owed
+    /// ledger: the money stays in the contract and anyone may retry it with `retry_owed`.
     #[private]
     pub fn on_payout(&mut self, job: u64, to: AccountId, amount: U128, kind: String, #[callback_result] r: Result<(), PromiseError>) {
         if r.is_ok() {
@@ -670,12 +719,100 @@ impl Contract {
         self.accounted += amount.0;
         if kind == "refund" {
             let mut j = self.job(job);
+            if j.state == JobState::Refunded {
+                self.open_jobs += 1; // it was counted closed when the refund was sent
+            }
             j.state = JobState::RefundDue;
             self.jobs.insert(job, j);
-        } else {
-            self.reserve += amount.0;
+            emit("payout_failed", json!({ "job_id": job, "to": to, "amount": amount, "kind": kind }));
+            return;
         }
-        emit("payout_failed", json!({ "job_id": job, "to": to, "amount": amount, "kind": kind }));
+        let id = self.owed_next;
+        self.owed_next += 1;
+        self.owed_open += 1;
+        self.owed.insert(id, Owed { id, job, to: to.clone(), amount, kind: kind.clone() });
+        emit("payout_failed", json!({ "job_id": job, "to": to, "amount": amount, "kind": kind, "owed_id": id }));
+    }
+
+    /// Tries a failed payout again. If it fails again it lands on the ledger under a new id. Anyone.
+    pub fn retry_owed(&mut self, id: u64) -> Promise {
+        let o = self.owed.remove(&id).unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
+        self.owed_open -= 1;
+        self.payout(&o.to, o.amount.0, o.job, &o.kind)
+    }
+
+    // ---------- treasury (SRD FR-62, FR-63, FR-75) ----------
+
+    /// Once per UTC day: `min(daily_budget, reserve - floor)` to Shark's wallet. Anyone.
+    pub fn fund_shark(&mut self) {
+        require!(!self.closed, "E_CLOSED");
+        let day = now_secs() / DAY_SECS;
+        require!(self.last_fund_day != day, "E_ONCE_PER_DAY");
+        let floor = self.reserve_floor();
+        require!(self.reserve > floor, "E_RESERVE_FLOOR");
+        let amount = self.config.daily_budget.0.min(self.reserve - floor);
+        self.last_fund_day = day;
+        self.reserve -= amount;
+        let to = self.shark_wallet.clone();
+        self.payout(&to, amount, 0, "shark_budget").detach();
+    }
+
+    /// Pays the owners' accrued share, only while the reserve is at its floor. Anyone.
+    pub fn pay_owners(&mut self) {
+        require!(!self.closed, "E_CLOSED");
+        require!(self.reserve >= self.reserve_floor(), "E_RESERVE_FLOOR");
+        let amount = self.owner_accrued;
+        require!(amount > 0, "E_WRONG_AMOUNT");
+        self.owner_accrued = 0;
+        let owner = self.owner.clone();
+        self.payout(&owner, amount, 0, "owner").detach();
+    }
+
+    /// The end: paused, nothing open, nothing owed → all USDC to the DAO and the contract closes (FR-75).
+    pub fn wind_down(&mut self) {
+        self.only(&self.owner.clone());
+        require!(self.paused, "E_PAUSED");
+        require!(self.open_jobs == 0 && self.owed_open == 0, "E_OPEN_JOBS");
+        let amount = self.accounted;
+        self.closed = true;
+        self.reserve = 0;
+        self.owner_accrued = 0;
+        emit("wound_down", json!({ "amount": U128(amount) }));
+        if amount > 0 {
+            let owner = self.owner.clone();
+            self.payout(&owner, amount, 0, "owner").detach();
+        }
+    }
+
+    /// Past the work deadline: the escrow goes back to Shark and the worker is marked late. The first time on an
+    /// awarded job the job goes back to auction without that worker; otherwise it is refunded (FR-35). Anyone.
+    pub fn expire_work(&mut self, job: u64) {
+        let mut j = self.job(job);
+        require!(matches!(j.state, JobState::Awarded | JobState::Revision), "E_BAD_STATE");
+        require!(now_secs() > j.work_deadline, "E_TIMEOUT_NOT_REACHED");
+        let worker = j.worker.clone().unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
+        self.worker_mut(&worker).late += 1;
+        if j.escrowed {
+            j.escrowed = false;
+            let (wallet, back) = (self.shark_wallet.clone(), j.worker_fee.0 + j.review_fee.0);
+            self.payout(&wallet, back, job, "shark_budget").detach();
+        }
+        if j.state == JobState::Awarded && !j.reauctioned {
+            j.state = JobState::Paid;
+            j.reauctioned = true;
+            j.excluded = Some(worker.clone());
+            j.worker = None;
+            j.worker_fee = U128(0);
+            j.bid_hash = None;
+            j.reason_hash = None;
+            j.round = 0;
+            j.awarded_at = None;
+            j.work_deadline = 0;
+            emit("re_auction", json!({ "job_id": job, "late_worker": worker }));
+        } else {
+            j.state = JobState::RefundDue;
+        }
+        self.jobs.insert(job, j);
     }
 
     // ---------- views ----------
@@ -732,7 +869,14 @@ impl Contract {
             reserve: U128(self.reserve),
             owner_accrued: U128(self.owner_accrued),
             accounted: U128(self.accounted),
+            open_jobs: self.open_jobs,
+            owed_open: self.owed_open,
         }
+    }
+
+    /// The ledger of failed payouts, oldest first from id `from`.
+    pub fn get_owed(&self, from: u64, limit: u64) -> Vec<Owed> {
+        (from.max(1)..self.owed_next).filter_map(|i| self.owed.get(&i).cloned()).take(limit.min(100) as usize).collect()
     }
 
     pub fn get_quote_pubkey(&self) -> PublicKey {
@@ -740,7 +884,7 @@ impl Contract {
     }
 
     pub fn get_roles(&self) -> Roles {
-        Roles { owner: self.owner.clone(), guardian: self.guardian.clone(), shark: self.shark.clone(), usdc: self.usdc.clone(), network: self.network.clone() }
+        Roles { owner: self.owner.clone(), guardian: self.guardian.clone(), shark: self.shark.clone(), shark_wallet: self.shark_wallet.clone(), usdc: self.usdc.clone(), network: self.network.clone() }
     }
 }
 
@@ -851,6 +995,8 @@ impl Contract {
                 review_requested_at: None,
                 unresolved_since: None,
                 held: false,
+                reauctioned: false,
+                excluded: None,
                 review_fee: self.config.review_fee,
                 referral_bps: self.config.referral_bps,
                 owner_bps: self.config.owner_bps,
@@ -858,6 +1004,7 @@ impl Contract {
                 job_timeout_secs: self.config.job_timeout_secs,
             },
         );
+        self.open_jobs += 1;
         Ok(id)
     }
 
@@ -867,6 +1014,14 @@ impl Contract {
         // shortcut: only NEAR payouts; Raven's Base payout via Chain Signatures comes with that slice (FR-60)
         self.payout(worker, j.worker_fee.0, j.id, "worker").detach();
         self.payout(reviewer, j.review_fee.0, j.id, "reviewer").detach();
+    }
+
+    fn reserve_floor(&self) -> u128 {
+        3 * self.config.daily_budget.0 + 2 * self.config.review_fee.0 // D-145
+    }
+
+    fn close_job(&mut self) {
+        self.open_jobs = self.open_jobs.saturating_sub(1);
     }
 
     /// FR-47: final fails plus lost disputes at the threshold suspend the worker.
@@ -897,6 +1052,23 @@ impl Contract {
         if self.strikes == self.config.strike_threshold {
             emit("caged", json!({ "count": self.strikes, "threshold": self.config.strike_threshold }));
         }
+    }
+
+    /// A refund registers the payer on the USDC token first if needed (FR-65). The contract pays the 0.00125 NEAR
+    /// deposit, so it needs a little NEAR; if the deposit fails the transfer still goes ahead.
+    fn payout_refund(&mut self, to: &AccountId, amount: u128, job: u64) -> Promise {
+        self.accounted -= amount;
+        ext_ft::ext(self.usdc.clone())
+            .with_attached_deposit(STORAGE_DEPOSIT)
+            .with_static_gas(GAS_STORAGE)
+            .storage_deposit(Some(to.clone()), Some(true))
+            .then(
+                ext_ft::ext(self.usdc.clone())
+                    .with_attached_deposit(ONE_YOCTO)
+                    .with_static_gas(GAS_FT_TRANSFER)
+                    .ft_transfer(to.clone(), U128(amount), Some(format!("sharkco:refund:{job}"))),
+            )
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_payout(job, to.clone(), U128(amount), "refund".into()))
     }
 
     fn payout(&mut self, to: &AccountId, amount: u128, job: u64, kind: &str) -> Promise {

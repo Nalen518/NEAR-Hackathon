@@ -72,6 +72,7 @@ let jobs: Map<number, ContractJob>;
 let paidQuotes: Map<string, number>;
 let complaints: { job: number; hash: string }[];
 let txs: string[];
+let keeperTxs: string[];
 
 const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   serviceState: async () => "ok",
@@ -82,8 +83,8 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
     { id: "raven-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["140000", "80000", "180000"], jobs: 0, first_pass: 0, final_fails: 0, disputes_won: 0, disputes_lost: 0, disputes_unresolved: 0, unresolved_open: 0, late: 0, suspended: false },
   ],
   reviewer: async () => ({ id: "owl-reviewer.testnet", reviews: 5, overturned: 0, suspended: false }),
-  stats: async () => ({ jobs: jobs.size, strikes: 1, reserve: "16460000", owner_accrued: "195000", accounted: "0" }),
-  roles: async () => ({ owner: "sharkco.testnet", guardian: "guardian.sharkco.testnet", shark: "shark.sharkco.testnet", usdc: USDC, network: "near:testnet" }),
+  stats: async () => ({ jobs: jobs.size, strikes: 1, reserve: "16460000", owner_accrued: "195000", accounted: "0", open_jobs: 0, owed_open: 0 }),
+  roles: async () => ({ owner: "sharkco.testnet", guardian: "guardian.sharkco.testnet", shark: "shark.sharkco.testnet", shark_wallet: "wallet.sharkco.testnet", usdc: USDC, network: "near:testnet" }),
   jobs: async (from, limit) => [...jobs.values()].filter((j) => j.id >= from).slice(0, limit),
   usdcBalance: async () => "3100000",
   job: async (id) => jobs.get(id) ?? null,
@@ -109,6 +110,11 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   settleFailed: async (job) => (txs.push(`settle_failed ${job}`), "TxSettle"),
   markUnresolved: async (job) => (txs.push(`mark_unresolved ${job}`), "TxUnresolved"),
   releaseUnresolved: async (job) => (txs.push(`release_unresolved ${job}`), "TxRelease"),
+  expireWork: async (job) => (txs.push(`expire_work ${job}`), "TxExpire"),
+  fundShark: async () => (keeperTxs.push("fund_shark"), "TxFund"),
+  payOwners: async () => (keeperTxs.push("pay_owners"), "TxOwners"),
+  owed: async () => [],
+  retryOwed: async (id) => (keeperTxs.push(`retry_owed ${id}`), "TxRetry"),
   ...over,
 });
 
@@ -121,6 +127,7 @@ beforeEach(() => {
   paidQuotes = new Map();
   complaints = [];
   txs = [];
+  keeperTxs = [];
   store = openStore(mkdtempSync(join(tmpdir(), "shark-")));
   app = makeApp();
 });
@@ -176,6 +183,8 @@ function job(id: number, over: Partial<ContractJob> = {}): ContractJob {
     review_requested_at: null,
     unresolved_since: null,
     held: false,
+    reauctioned: false,
+    excluded: null,
     review_fee: "50000",
     referral_bps: 750,
     owner_bps: 6000,
@@ -592,11 +601,15 @@ describe("job loop: after the award", () => {
     await tick(loopDeps({ "http://crab.local": crab }, calls));
     expect(calls.map((c) => c.body)).toEqual([{ jobId: "j_000001", price: "0.18", awardTx: "TxAward", round: 2, codes: ["FAIL_LENGTH"] }]);
   });
-  it("late work goes to refund due", async () => {
+  it("late work is expired on chain: the contract sends it back to auction or refunds it", async () => {
     await awarded();
     job(1, { ...jobs.get(1)!, escrowed: true, work_deadline: NOW - 61 });
     await tick(loopDeps({}));
-    expect(txs).toEqual(["refund_due 1"]);
+    expect(txs).toEqual(["expire_work 1"]);
+    txs = [];
+    job(1, { ...jobs.get(1)!, work_deadline: NOW - 59 }); // still inside the grace
+    await tick(loopDeps({}));
+    expect(txs).toEqual([]);
   });
   it("finalizes after the complaint window and pays due refunds", async () => {
     job(1, { state: "delivered", complaint_until: NOW - 1 });
@@ -774,5 +787,50 @@ describe("disputes on the job page and the company page", () => {
     expect(c.workers.map((w) => [w.id, w.disputesWon, w.disputesLost, w.unresolvedOpen, w.eligible, w.ineligibleReason])).toEqual([["crab", 2, 1, 0, true, null], ["raven", 0, 0, 2, false, "unresolved_cap"]]);
     expect(c.incidents.map((i) => [i.orderId, i.kind, i.strike]).sort()).toEqual([["j_000001", "dispute_won", false], ["j_000002", "dispute", false], ["j_000003", "dispute", false]]);
     for (const i of c.incidents) expect(i.text).not.toMatch(/[;—–]|\w-\w/);
+  });
+});
+
+describe("re-auction after a late worker (FR-35)", () => {
+  it("asks everyone but the late worker, and awards a second time", async () => {
+    job(1, unawarded);
+    await tick(loopDeps({ "http://crab.local": crab, "http://raven.local": raven }));
+    expect(txs).toEqual(["award 1 crab-worker.testnet 180000"]);
+    txs = [];
+    job(1, { ...unawarded, reauctioned: true, excluded: "crab-worker.testnet" });
+    const calls: { url: string; body: unknown }[] = [];
+    await tick(loopDeps({ "http://crab.local": crab, "http://raven.local": raven }, calls));
+    expect(calls.map((c) => c.url)).toEqual(["http://raven.local/rfq"]);
+    expect(txs).toEqual(["award 1 raven-worker.testnet 240000"]);
+    expect(store.auction(1)).toMatchObject({ reauction: true, winner: "raven-worker.testnet", award_tx: "TxAward" });
+    await tick(loopDeps({ "http://crab.local": crab, "http://raven.local": raven }, calls)); // not a third time
+    expect(txs).toHaveLength(1);
+  });
+});
+
+describe("daily and owed keepers", () => {
+  const day = 20_758 * 86_400;
+  it("funds Shark and pays the owners once a day after 00:05 UTC, and a revert does not stop the loop", async () => {
+    let now = day + 100;
+    const deps = (chain = fakeChain()) => ({ ...loopDeps({}, [], chain), now: () => now });
+    await tick(deps());
+    expect(keeperTxs).toEqual([]);
+    now = day + 301;
+    await tick(deps());
+    await tick(deps());
+    expect(keeperTxs).toEqual(["fund_shark", "pay_owners"]);
+    now = day + 86_400 + 301;
+    await tick(deps(fakeChain({ fundShark: async () => { throw new Error("E_RESERVE_FLOOR"); } })));
+    expect(keeperTxs).toEqual(["fund_shark", "pay_owners", "pay_owners"]);
+  });
+  it("retries owed payouts once an hour", async () => {
+    const owed = [{ id: 1, job: 5, to: "crab-worker.testnet", amount: "180000", kind: "worker" }, { id: 2, job: 6, to: "owl-reviewer.testnet", amount: "50000", kind: "reviewer" }];
+    let now = day + 100;
+    const deps = () => ({ ...loopDeps({}, [], fakeChain({ owed: async () => owed })), now: () => now });
+    await tick(deps());
+    await tick(deps());
+    expect(keeperTxs).toEqual(["retry_owed 1", "retry_owed 2"]);
+    now += 3_600;
+    await tick(deps());
+    expect(keeperTxs).toEqual(["retry_owed 1", "retry_owed 2", "fund_shark", "pay_owners", "retry_owed 1", "retry_owed 2"]); // an hour later is also past 00:05
   });
 });

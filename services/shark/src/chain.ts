@@ -56,6 +56,8 @@ export type ContractJob = {
   review_requested_at: number | null;
   unresolved_since: number | null;
   held: boolean;
+  reauctioned: boolean;
+  excluded: string | null;
   review_fee: string;
   referral_bps: number;
   owner_bps: number;
@@ -76,8 +78,9 @@ export type ContractWorker = {
   suspended: boolean;
 };
 export type ContractReviewer = { id: string; reviews: number; overturned: number; suspended: boolean };
-export type ContractStats = { jobs: number; strikes: number; reserve: string; owner_accrued: string; accounted: string };
-export type ContractRoles = { owner: string; guardian: string; shark: string; usdc: string; network: string };
+export type ContractStats = { jobs: number; strikes: number; reserve: string; owner_accrued: string; accounted: string; open_jobs: number; owed_open: number };
+export type ContractOwed = { id: number; job: number; to: string; amount: string; kind: string };
+export type ContractRoles = { owner: string; guardian: string; shark: string; shark_wallet: string; usdc: string; network: string };
 
 /** NEP-413 `signMessage` output (API §1.5a), nonce and signature base64. */
 export type Nep413 = { accountId: string; publicKey: string; signature: string; message: string; nonce: string; recipient: string };
@@ -93,6 +96,8 @@ export type Chain = {
   /** Jobs with ids from `from`, oldest first, at most `limit` (≤ 100). */
   jobs(from: number, limit: number): Promise<ContractJob[]>;
   usdcBalance(account: string): Promise<string>;
+  /** Failed payouts waiting for a retry, oldest first from id `from`. */
+  owed(from: number, limit: number): Promise<ContractOwed[]>;
   job(id: number): Promise<ContractJob | null>;
   jobByQuote(quoteId: string): Promise<ContractJob | null>;
   accountExists(id: string): Promise<boolean>;
@@ -114,6 +119,12 @@ export type Chain = {
   settleFailed(job: number): Promise<string>;
   markUnresolved(job: number): Promise<string>;
   releaseUnresolved(job: number): Promise<string>;
+  /** Late work: the escrow goes back, then one re-auction or a refund (FR-35). */
+  expireWork(job: number): Promise<string>;
+  /** Daily treasury keepers (FR-62, FR-63). They revert when the reserve is at its floor or already ran today. */
+  fundShark(): Promise<string>;
+  payOwners(): Promise<string>;
+  retryOwed(id: number): Promise<string>;
 };
 
 export type ChainOpts = {
@@ -153,6 +164,7 @@ export function rpcChain(opts: ChainOpts): Chain {
     roles: () => view<ContractRoles>("get_roles"),
     jobs: (from, limit) => view<ContractJob[]>("get_jobs", { from, limit }),
     usdcBalance: (account) => view<string>("ft_balance_of", { account_id: account }, opts.usdcId),
+    owed: (from, limit) => view<ContractOwed[]>("get_owed", { from, limit }),
     job: (id) => view<ContractJob | null>("get_job", { job: id }),
     jobByQuote: (quoteId) => view<ContractJob | null>("get_job_by_quote", { quote_id: quoteId }),
     accountExists: (id) =>
@@ -182,6 +194,10 @@ export function rpcChain(opts: ChainOpts): Chain {
     settleFailed: (job) => call(wallet(), "settle_failed", { job }),
     markUnresolved: (job) => call(wallet(), "mark_unresolved", { job }),
     releaseUnresolved: (job) => call(wallet(), "release_unresolved", { job }, 100n * TGAS),
+    expireWork: (job) => call(wallet(), "expire_work", { job }, 100n * TGAS),
+    fundShark: () => call(wallet(), "fund_shark", {}, 100n * TGAS),
+    payOwners: () => call(wallet(), "pay_owners", {}, 100n * TGAS),
+    retryOwed: (id) => call(wallet(), "retry_owed", { id }, 100n * TGAS),
   };
 }
 

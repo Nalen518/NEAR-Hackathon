@@ -13,3 +13,5 @@ cargo near build non-reproducible-wasm --no-abi
 ```
 
 On Windows, add NASM to `PATH` first (a test dependency needs it). `--no-abi` is needed because cargo-near's ABI step can't link on Windows.
+
+The contract itself needs a little NEAR (about 0.01) because `pay_refund` pays the 0.00125 NEAR USDC storage deposit for a payer who is no longer registered. Shark funds it at deploy.

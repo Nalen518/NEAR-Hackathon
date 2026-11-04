@@ -23,8 +23,13 @@ export const bidDigest = (b: Pick<Bid, "workerId" | "jobId" | "etaSecs">, priceB
 const name = (id: string, config: Config) => (id === config.agents.crab ? "Crab" : id === config.agents.raven ? "Raven" : id);
 const orderId = (id: number) => `j_${String(id).padStart(6, "0")}`;
 
+const DAY = 86_400;
+const DAILY_AT_SECS = 5 * 60; // 00:05 UTC (ARCHITECTURE §7)
+const OWED_RETRY_SECS = 3_600;
+
 export async function tick(d: LoopDeps): Promise<void> {
   const log = d.log ?? ((o) => console.log(JSON.stringify(o)));
+  await keepers(d, log);
   const stats = await d.chain.stats();
   const jobs: ContractJob[] = [];
   for (let from = 1; from <= stats.jobs; from += 100) jobs.push(...(await d.chain.jobs(from, 100)));
@@ -37,17 +42,33 @@ export async function tick(d: LoopDeps): Promise<void> {
   }
 }
 
+/** Once a day at 00:05 UTC fund Shark's budget and pay the owners, and once an hour retry failed payouts. The contract
+ * decides: both daily calls revert when the reserve is at its floor or there is nothing to pay, which is normal. */
+async function keepers(d: LoopDeps, log: (o: Record<string, unknown>) => void) {
+  const now = d.now();
+  const day = Math.floor(now / DAY);
+  if (now % DAY >= DAILY_AT_SECS && d.store.kv("daily") !== String(day)) {
+    d.store.setKv("daily", String(day));
+    for (const [keeper, run] of [["fund_shark", d.chain.fundShark], ["pay_owners", d.chain.payOwners]] as const)
+      await run().catch((e) => log({ level: "info", keeper, skipped: String(e).slice(0, 120) }));
+  }
+  if (now - Number(d.store.kv("owed_at") ?? 0) >= OWED_RETRY_SECS) {
+    d.store.setKv("owed_at", String(now));
+    for (const o of await d.chain.owed(1, 100)) await d.chain.retryOwed(o.id).catch((e) => log({ level: "error", owedId: o.id, error: String(e) }));
+  }
+}
+
 async function step(d: LoopDeps, job: ContractJob) {
   const { chain, store, now } = d;
   const row = store.auction(job.id);
   const late = job.work_deadline > 0 && now() > job.work_deadline + LATE_GRACE_SECS;
   switch (job.state) {
     case "paid":
-      if (!row) return runAuction(d, job);
+      if (!row || (job.reauctioned && !row.reauction)) return runAuction(d, job);
       if (!row.winner) return; // no valid bid: the refund was already asked for
       return; // award sent but not seen on chain yet
     case "awarded":
-      if (late) return void (await chain.markRefundDue(job.id));
+      if (late) return void (await chain.expireWork(job.id));
       if (row && !job.escrowed && !row.escrow_tx) {
         const reviewFee = BigInt(job.review_fee);
         row.escrow_tx = await chain.escrow(job.id, (BigInt(job.worker_fee) + reviewFee).toString());
@@ -56,7 +77,7 @@ async function step(d: LoopDeps, job: ContractJob) {
       if (row && job.escrowed && row.round_sent < 1) await notify(d, job, row, 1);
       return;
     case "revision":
-      if (late) return void (await chain.markRefundDue(job.id));
+      if (late) return void (await chain.expireWork(job.id));
       if (row && row.round_sent < 2) await notify(d, job, row, 2);
       return;
     case "delivered":
@@ -93,7 +114,7 @@ async function runAuction(d: LoopDeps, job: ContractJob) {
   const cap = (BigInt(job.price) * BigInt(cfg.worker_cap_bps)) / 10_000n;
   const quote = store.quote(job.quote_id);
   const size = quote ? (JSON.parse(quote.input) as { pages: number; words: number }) : { pages: 0, words: 0 };
-  const eligible = workers.filter((w) => !w.suspended && w.types.includes(job.job_type) && config.workerUrls[w.id]);
+  const eligible = workers.filter((w) => !w.suspended && w.types.includes(job.job_type) && w.id !== job.excluded && config.workerUrls[w.id]);
   const rfq = {
     jobId: orderId(job.id),
     jobType: job.job_type,
@@ -144,6 +165,7 @@ async function runAuction(d: LoopDeps, job: ContractJob) {
     escrow_tx: null,
     round_sent: 0,
     at: now(),
+    reauction: job.reauctioned,
   };
   store.putAuction(row);
   if (!win) {

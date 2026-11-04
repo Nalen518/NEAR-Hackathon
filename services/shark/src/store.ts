@@ -36,6 +36,8 @@ export type AuctionRow = {
   escrow_tx: string | null;
   round_sent: number;
   at: number;
+  /** This is the second auction, after the first worker was late (FR-35) */
+  reauction?: boolean;
 };
 
 export function openStore(dir: string) {
@@ -49,6 +51,7 @@ export function openStore(dir: string) {
     create table if not exists nonces (nonce text primary key, at int);
     create table if not exists complaints (payer text, at int);
     create table if not exists auctions (job_id int primary key, row text);
+    create table if not exists kv (key text primary key, value text);
   `);
   const blob = (hash: string) => join(dir, "files", hash.replace(/^sha256:/, ""));
   return {
@@ -91,6 +94,8 @@ export function openStore(dir: string) {
     /** Newest first. */
     auctions: (limit: number): AuctionRow[] =>
       (db.prepare("select row from auctions order by json_extract(row, '$.at') desc, job_id desc limit ?").all(limit) as { row: string }[]).map((r) => JSON.parse(r.row)),
+    kv: (key: string) => (db.prepare("select value from kv where key = ?").get(key) as { value: string } | undefined)?.value ?? null,
+    setKv: (key: string, value: string) => db.prepare("insert or replace into kv values (?, ?)").run(key, value),
     putAuction: (a: AuctionRow) => db.prepare("insert or replace into auctions values (?, ?)").run(a.job_id, JSON.stringify(a)),
     auction: (jobId: number): AuctionRow | undefined => {
       const r = db.prepare("select row from auctions where job_id = ?").get(jobId) as { row: string } | undefined;

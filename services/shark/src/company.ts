@@ -72,7 +72,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
   // shortcut: reads every job each call; fine for a hackathon's few hundred jobs, cache or index beyond that
   const jobs: ContractJob[] = [];
   for (let from = 1; from <= stats.jobs; from += 100) jobs.push(...(await chain.jobs(from, 100)));
-  const sharkWallet = await chain.usdcBalance(roles.shark).catch(() => "0");
+  const sharkWallet = await chain.usdcBalance(roles.shark_wallet).catch(() => "0");
 
   const idOf = (account: string | null): WorkerId | null =>
     account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : null;
