@@ -7,10 +7,10 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 
 **How "done" is checked:** every response is parsed with the web's schemas from `packages/shared` in `services/shark/test/contract.test.ts`, against a fake chain. Nothing has run on testnet yet.
 
-Last updated: 4 Nov 2026 (after `5a8ac61`)
+Last updated: 4 Nov 2026 (after `e224e9d`)
 
 ## Resume here (next session)
-Start at "Next" item 4b: our own x402 facilitator service (built on `@x402/near`, tested with a fake signer; running it for real needs a funded relayer account). Then item 5, the event reader. Tests at the last commit: Shark 79, agents 22, checks 12, shared 25, web 47, contract 68. Nothing is deployed and nothing is pushed.
+Start at "Next" item 6: `GET /v1/openapi.json`. Then 4b (our own x402 facilitator service), 7 (sandbox tests of the real wasm in Docker) and 8 (Rust port of the code checks). Tests at the last commit: Shark 89, agents 22, checks 12, shared 25, web 47, contract 68. Nothing is deployed and nothing is pushed.
 
 ## A. Must (the web goes live on these)
 
@@ -18,7 +18,7 @@ Start at "Next" item 4b: our own x402 facilitator service (built on `@x402/near`
 | --- | --- | --- | --- |
 | A1 Serve `/v1/*` with `near:testnet` | ✅ | `b37e5fb` | Prices, Company, Health, PaymentOptions, QuoteStatus all parse |
 | A2 `POST /v1/orders` 402 with a signed quote | ✅ | `5a8ac61` | Canonical quote bytes pinned in the Rust and TS tests. Also carries the x402 v2 `PAYMENT-REQUIRED` header |
-| A3 `GET /v1/quotes/{id}` | 🟡 | `f523c10` | AWAITING_PAYMENT, PAID, EXPIRED work. RETURNED needs the event reader |
+| A3 `GET /v1/quotes/{id}` | ✅ | `e224e9d` | AWAITING_PAYMENT, PAID, EXPIRED, RETURNED (from the payment receipt, after 90 s with no job) and the payment tx |
 | A4 `POST /v1/uploads` | ✅ | `f523c10` | PDF, HTML, TXT, MD. 413 and 422 |
 | A5 Errors per §0.1 | ✅ | `f523c10` | `charged`, `details.field`, `Retry-After` on 429, 502 and 503 |
 | A6 Public view | ✅ | `f523c10` | Leaks no instructions, source, params or delivery |
@@ -33,10 +33,10 @@ Start at "Next" item 4b: our own x402 facilitator service (built on `@x402/near`
 
 | Item | Status | Where | Notes |
 | --- | --- | --- | --- |
-| B1 Timeline events with tx links | 🟡 | `110076b` | paid, awarded (worker, award tx), delivered, review pass or fail, revision, dispute, second review, unresolved. Payout and refund events with tx links need the event reader |
+| B1 Timeline events with tx links | ✅ | `e224e9d` | Every step links its tx; adds worker_paid, reviewer_paid, refunded, finalized, complaint. Built from the indexer's receipts: untested against real testnet data |
 | B2 Per-check review results | ✅ | `cb15147` | Code checks with detail, model checks pass only, Owl's reasons |
 | B3 Exact rule strings | ✅ | `f523c10` | The web's list in `apps/web/lib/checklist.ts` is now the real one |
-| B4 Company core (P6) | 🟡 | `110076b` | Live: strikes, reserve, P&L, workers (with disputes and the unresolved cap), reviewer, ledger, config. Sample: DAO proposals (no DAO yet), payouts (needs the event reader) |
+| B4 Company core (P6) | 🟡 | `e224e9d` | Live: strikes, reserve, P&L, workers, reviewer, ledger (with worker payout txs), config, payouts (from the reader, owners' payouts not listed). Sample: DAO proposals (no DAO yet) |
 | B5 `money` on orders | ✅ | `f523c10` | Same split as the contract's `finalize` |
 | B6 `404 order_not_found` | ✅ | `ca2bf11` | Schema fixed too |
 
@@ -44,7 +44,7 @@ Start at "Next" item 4b: our own x402 facilitator service (built on `@x402/near`
 
 | Item | Status | Where | Notes |
 | --- | --- | --- | --- |
-| C1 Recent quotes with status | 🟡 | `fd56a27` | Last 20 quotes, paid or expired. "returned" and its reason need the event reader |
+| C1 Recent quotes with status | ✅ | `e224e9d` | Last 20 quotes: paid, returned (with the payment tx) or expired. `returnReason` is always null: the indexer gives no return value |
 | C2 Auctions and incidents logs | 🟡 | `fd56a27` | Auctions log done. Incidents from job state (complaints, impossible briefs); disputes, late work and strikes need the event reader |
 | C3 `details.fixes[]` on brief_infeasible | ✅ | `fd56a27` | `{label, params, price}`. The web still offers its own fixes until it reads these |
 
@@ -64,7 +64,7 @@ Start at "Next" item 4b: our own x402 facilitator service (built on `@x402/near`
 | 3 | Contract: `pay_owners`, `fund_shark`, `wind_down`, late worker re-auction, storage deposit in `pay_refund`, an owed ledger for failed payouts; Shark keepers for all of them | ✅ `c4b6b93` |
 | 4 | x402: the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` flow with a facilitator client, contract `mark_paid_x402` and `return_x402` (balance checked in a callback) | ✅ `5a8ac61` |
 | 4b | Our own x402 facilitator service on `@x402/near` (`/verify`, `/settle`, `/supported`), fake signer in tests | ⬜ |
-| 5 | Event reader (NEP-297 logs) for B1 tx links, the payouts list, RETURNED quotes and the incidents log | ⬜ |
+| 5 | Event reader for B1 tx links, the payouts list and RETURNED quotes | ✅ `e224e9d` (incidents for late work and strikes still come from job state) |
 | 6 | `GET /v1/openapi.json` (FR-14) | ⬜ |
 | 7 | Sandbox tests of the real wasm in Docker (full job path) | ⬜ |
 | 8 | Rust port of the code checks, for Owl in the OutLayer TEE (NFR-02) | ⬜ |
@@ -88,5 +88,6 @@ Start at "Next" item 4b: our own x402 facilitator service (built on `@x402/near`
 - Suspension counts final fails plus lost disputes over a worker's whole record, not the last 20 jobs.
 - A worker disputes only when its own delivery passes every code check.
 - The rate limit is kept in memory on one host.
+- The event reader uses a public indexer (NearBlocks, no key) that lists calls but not logs, so payouts are derived from the call that triggers them and the owners' payouts have no amount. It asks once a minute and is untested against real data until the contract is deployed. The exact `cursor` paging was seen live; pages are walked newest first until one is already known.
 - If the facilitator times out in the middle of `/settle`, Shark answers 502 and does not reconcile: a payment that moved anyway shows up as an unmatched deposit to return by hand (needs the event reader).
 - The URL fetcher checks the address before connecting, so DNS rebinding isn't caught.
