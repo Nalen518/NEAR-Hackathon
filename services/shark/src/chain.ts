@@ -3,6 +3,7 @@
 import type { JobType } from "@shark/shared";
 import { Account, JsonRpcProvider, KeyPairSigner, type KeyPairString, type Provider } from "near-api-js";
 import { verifyMessage } from "near-api-js/nep413";
+import type { SignedQuote } from "./quote";
 
 export type ChainState = "ok" | "paused" | "caged" | "closed";
 
@@ -36,6 +37,7 @@ export type ContractJob = {
   input_hash: string;
   brief_hash: string;
   referrer: string | null;
+  method: "quote" | "x402";
   state: JobState;
   paid_at: number;
   worker: string | null;
@@ -125,7 +127,12 @@ export type Chain = {
   fundShark(): Promise<string>;
   payOwners(): Promise<string>;
   retryOwed(id: number): Promise<string>;
+  /** x402 (method 3): Shark reports a settled payment, or sends an unmatched one back. The contract checks its balance. */
+  markPaidX402(quote: SignedQuote, sig: string, settlement: X402Settlement): Promise<string>;
+  returnX402(settlement: X402Settlement): Promise<string>;
 };
+
+export type X402Settlement = { tx_hash: string; payer: string; amount: string };
 
 export type ChainOpts = {
   rpcUrl: string;
@@ -198,6 +205,8 @@ export function rpcChain(opts: ChainOpts): Chain {
     fundShark: () => call(wallet(), "fund_shark", {}, 100n * TGAS),
     payOwners: () => call(wallet(), "pay_owners", {}, 100n * TGAS),
     retryOwed: (id) => call(wallet(), "retry_owed", { id }, 100n * TGAS),
+    markPaidX402: (quote, sig, settlement) => call(shark(), "mark_paid_x402", { quote, sig, settlement }, 100n * TGAS),
+    returnX402: (settlement) => call(shark(), "return_x402", { settlement }, 100n * TGAS),
   };
 }
 

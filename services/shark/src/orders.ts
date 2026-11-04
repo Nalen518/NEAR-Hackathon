@@ -17,7 +17,7 @@ import {
   ThreadParams,
 } from "@shark/shared";
 import { MODEL_RULE_CODES, runCodeChecks } from "@shark/checks";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { buildBrief, infeasibleFixes, priceJob, refuseHarmful } from "./brief";
 import type { Chain, ContractJob } from "./chain";
 import type { Config } from "./config";
@@ -25,8 +25,9 @@ import { HttpError } from "./errors";
 import { fetchSnapshot, fileToSnapshot, MAX_BYTES, snapshotText, type Snapshot } from "./input";
 import { canonicalJson, sha256Ref, signQuote, ulid, type SignedQuote } from "./quote";
 import type { QuoteRow, Store } from "./store";
+import { encode, paymentRequired, payWithX402, type Facilitator } from "./x402";
 
-export type OrderDeps = { config: Config; chain: Chain; store: Store; now: () => number; fetchImpl?: typeof fetch };
+export type OrderDeps = { config: Config; chain: Chain; store: Store; now: () => number; fetchImpl?: typeof fetch; facilitator?: Facilitator };
 
 const QUOTE_TTL_SECS = 600; // FR-08
 const IDEM_WINDOW_SECS = 600;
@@ -53,6 +54,7 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
     networkId: config.networkId,
     blob: store.blob,
     auction: store.auction,
+    paymentTx: (quoteId) => store.kv(`paytx:${quoteId}`),
     idOf: (account) => (account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : null),
   };
 
@@ -96,7 +98,15 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
   });
 
   // §1.2
+  /** Every 402 also offers x402 (method 3) when a facilitator is configured. */
+  const offerX402 = (c: Context, q: Quote402) => {
+    if (d.facilitator) c.header("PAYMENT-REQUIRED", encode(paymentRequired(config, q)));
+  };
+
   app.post("/v1/orders", async (c) => {
+    // the retry of a 402 with PAYMENT-SIGNATURE is found by the quote it pays (API §1.2 step 3), not by re-running the order
+    const signature = c.req.header("PAYMENT-SIGNATURE");
+    if (signature) return payWithX402(c, signature, { config, chain, store, now, facilitator: d.facilitator, serviceCheck });
     const body: unknown = await c.req.json().catch(() => null);
     const net = (body as { network?: unknown } | null)?.network;
     if (net !== undefined && net !== config.networkId)
@@ -123,6 +133,7 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
         if (job) return c.json({ orderId: orderId(job.id), status: "paid", statusUrl: `/v1/orders/${orderId(job.id)}` }, 202);
         if (now() > prev.expires_at) throw new HttpError(410, "quote_expired", "This quote expired. Ask for a new one.");
         c.header("WWW-Authenticate", `SharkQuote quote_id="${prev.id}"`);
+        offerX402(c, JSON.parse(prev.response));
         return c.json(JSON.parse(prev.response), 402);
       }
     }
@@ -213,8 +224,8 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
       input: JSON.stringify(res.input),
       response: JSON.stringify(res),
     });
-    // shortcut: no x402 PAYMENT-REQUIRED header yet; it comes with the x402 slice (FR-12)
     c.header("WWW-Authenticate", `SharkQuote quote_id="${quoteId}"`);
+    offerX402(c, res);
     return c.json(res, 402);
   });
 
@@ -225,7 +236,7 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
     const job = await chain.jobByQuote(row.id);
     // shortcut: RETURNED needs the payment_returned event (an indexer); until then a returned payment shows AWAITING_PAYMENT, then EXPIRED
     const status: QuoteStatus["status"] = job ? "PAID" : now() > row.expires_at ? "EXPIRED" : "AWAITING_PAYMENT";
-    return c.json({ quoteId: row.id, method: "quote", status, orderId: job ? orderId(job.id) : null, paymentTx: null, oneClickStatus: null } satisfies QuoteStatus);
+    return c.json({ quoteId: row.id, method: job?.method ?? "quote", status, orderId: job ? orderId(job.id) : null, paymentTx: store.kv(`paytx:${row.id}`), oneClickStatus: null } satisfies QuoteStatus);
   });
 
   async function loadJob(raw: string) {
@@ -287,7 +298,7 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
 }
 
 const PASSED: ContractJob["state"][] = ["delivered", "complaint_review", "finalized"];
-type ViewCtx = { networkId: Config["networkId"]; blob: Store["blob"]; auction: Store["auction"]; idOf: (account: string | null) => "crab" | "raven" | null };
+type ViewCtx = { networkId: Config["networkId"]; blob: Store["blob"]; auction: Store["auction"]; paymentTx: (quoteId: string) => string | null; idOf: (account: string | null) => "crab" | "raven" | null };
 
 /** Contract job + Shark's quote record → the §1.5 shape. The public view never carries private fields (D-166). */
 function orderView(job: ContractJob, row: QuoteRow | undefined, view: "public", ctx: ViewCtx): OrderPublic;
@@ -322,7 +333,7 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
     const referral = job.referrer && job.referrer !== job.payer && job.referrer !== job.worker ? (price * BigInt(job.referral_bps)) / 10_000n : 0n;
     const profit = price - workerFee - reviewFee - referral;
     const owners = profit > 0n ? (profit * BigInt(job.owner_bps)) / 10_000n : 0n;
-    money = { method: "quote", price: usdc(price), workerFee: usdc(workerFee), reviewFee: usdc(reviewFee), referral: usdc(referral), owners: usdc(owners), reserve: usdc(price - referral - owners) };
+    money = { method: job.method, price: usdc(price), workerFee: usdc(workerFee), reviewFee: usdc(reviewFee), referral: usdc(referral), owners: usdc(owners), reserve: usdc(price - referral - owners) };
   }
 
   const refunding = job.state === "refund_due" || job.state === "refunded";
@@ -362,7 +373,7 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
         job.state === "complaint_review" ? ("complaint_review" as const) : job.complaint_hash ? (refunding ? ("upheld" as const) : ("rejected" as const)) : null,
     },
     refund: refunding ? { to: job.payer, amount: usdc(price), reason: refundReason, tx: null } : null,
-    proof: { paymentTx: null, awardTx: auction?.award_tx ?? null, workerPayoutTx: null, contractTxs: [auction?.award_tx, auction?.escrow_tx].filter((t): t is string => !!t) },
+    proof: { paymentTx: ctx.paymentTx(job.quote_id), awardTx: auction?.award_tx ?? null, workerPayoutTx: null, contractTxs: [auction?.award_tx, auction?.escrow_tx].filter((t): t is string => !!t) },
     sample: false,
   };
   if (view === "public")

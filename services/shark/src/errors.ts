@@ -10,12 +10,14 @@ export class HttpError extends Error {
     message: string,
     readonly details?: Record<string, unknown>,
     readonly retryAfter?: number,
+    readonly headers?: Record<string, string>,
   ) {
     super(message);
   }
 }
 
 export function sendError(c: Context, e: HttpError) {
+  for (const [k, v] of Object.entries(e.headers ?? {})) c.header(k, v);
   if (e.retryAfter !== undefined) c.header("Retry-After", String(Math.ceil(e.retryAfter)));
   return c.json({ error: e.code, message: e.message, charged: false, ...(e.details ? { details: e.details } : {}) }, e.status);
 }

@@ -7,7 +7,7 @@
 //! to the OutLayer `request_execution` callback when Owl runs in the TEE (O-03, O-13).
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
-use near_sdk::store::{IterableMap, LookupMap};
+use near_sdk::store::{IterableMap, LookupMap, LookupSet};
 use near_sdk::{
     AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PromiseOrValue, PublicKey, env, ext_contract,
     near, require,
@@ -19,6 +19,7 @@ const GAS_STORAGE: Gas = Gas::from_tgas(15);
 /** NEP-145 minimum for registering an account on the USDC token (API §1.2 `register`) */
 const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
 const DAY_SECS: u64 = 86_400;
+const GAS_VIEW: Gas = Gas::from_tgas(5);
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 const BPS: u128 = 10_000;
 const QUOTE_DOMAIN: &str = "sharkco:quote:v2|";
@@ -28,6 +29,7 @@ const QUOTE_DOMAIN: &str = "sharkco:quote:v2|";
 trait FungibleToken {
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
     fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>);
+    fn ft_balance_of(&self, account_id: AccountId) -> U128;
 }
 
 #[near(serializers = [json, borsh])]
@@ -166,6 +168,8 @@ pub struct Job {
     pub input_hash: String,
     pub brief_hash: String,
     pub referrer: Option<AccountId>,
+    /// How it was paid: "quote" (method 1) or "x402" (method 3)
+    pub method: String,
     pub state: JobState,
     pub paid_at: u64,
     pub worker: Option<AccountId>,
@@ -201,6 +205,15 @@ pub struct Job {
     pub owner_bps: u16,
     pub complaint_window_secs: u64,
     pub job_timeout_secs: u64,
+}
+
+/// What the x402 facilitator settled (API §1.2 method 3, SettlementResponse).
+#[near(serializers = [json])]
+#[derive(Clone)]
+pub struct Settlement {
+    pub tx_hash: String,
+    pub payer: AccountId,
+    pub amount: U128,
 }
 
 /// Owl's result (API §2.4 output).
@@ -251,6 +264,8 @@ enum Key {
     Workers,
     UsedQuotes,
     Owed,
+    X402Pending,
+    X402UsedTx,
 }
 
 #[near(contract_state)]
@@ -285,6 +300,10 @@ pub struct Contract {
     owed: LookupMap<u64, Owed>,
     owed_next: u64,
     owed_open: u64,
+    /// Quotes and settlement txs ("q:..." and "t:...") whose balance check is in flight
+    x402_pending: LookupSet<String>,
+    /// Settlement txs already turned into a job or returned (an x402 payment counts once)
+    x402_used_tx: LookupSet<String>,
 }
 
 fn now_secs() -> u64 {
@@ -337,6 +356,8 @@ impl Contract {
             owed: LookupMap::new(Key::Owed),
             owed_next: 1,
             owed_open: 0,
+            x402_pending: LookupSet::new(Key::X402Pending),
+            x402_used_tx: LookupSet::new(Key::X402UsedTx),
         };
         c.check_config(&config);
         c
@@ -741,6 +762,64 @@ impl Contract {
         self.payout(&o.to, o.amount.0, o.job, &o.kind)
     }
 
+    // ---------- method 3: x402 (API §1.2, FR-12) ----------
+
+    /// Shark reports an x402 payment its facilitator settled. The quote must be valid and unused, `settlement` must
+    /// match it, and the contract's own USDC balance must have grown by the price (checked in the callback), so a
+    /// lying Shark can't create a paid job from nothing. Shark only (and serialized, NFR-05).
+    pub fn mark_paid_x402(&mut self, quote: Quote, sig: String, settlement: Settlement) -> Promise {
+        self.only(&self.shark.clone());
+        if let Err(e) = self.check_quote(&quote, &sig) {
+            env::panic_str(e);
+        }
+        require!(settlement.payer == quote.payer, "E_WRONG_PAYER");
+        require!(settlement.amount.0 == quote.price.0, "E_WRONG_AMOUNT");
+        self.begin_x402(&format!("q:{}", quote.quote_id), &settlement.tx_hash);
+        self.balance_check().then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_x402_balance(quote, settlement))
+    }
+
+    #[private]
+    pub fn on_x402_balance(&mut self, quote: Quote, settlement: Settlement, #[callback_result] balance: Result<U128, PromiseError>) {
+        self.end_x402(&format!("q:{}", quote.quote_id), &settlement.tx_hash);
+        let grew = matches!(balance, Ok(b) if b.0 >= self.accounted + quote.price.0);
+        let open = !self.closed && !self.paused && self.strikes < self.config.strike_threshold && !self.used_quotes.contains_key(&quote.quote_id);
+        if !grew || !open {
+            // nothing is created; Shark sees no job and returns the money with `return_x402`
+            let reason = if grew { "E_PAUSED" } else { "E_BALANCE_NOT_RECEIVED" };
+            emit("x402_rejected", json!({ "quote_id": quote.quote_id, "tx": settlement.tx_hash, "reason": reason }));
+            return;
+        }
+        self.x402_used_tx.insert(settlement.tx_hash.clone());
+        self.accounted += quote.price.0;
+        let id = self.open_job(quote, "x402");
+        let j = self.job(id);
+        emit(
+            "job_paid",
+            json!({ "job_id": id, "quote_id": j.quote_id, "payer": j.payer, "job_type": j.job_type, "price": j.price, "method": "x402", "tx": settlement.tx_hash, "referrer": j.referrer }),
+        );
+    }
+
+    /// An x402 payment landed but couldn't become a job: send it back to the payer (fail to refund, never keep).
+    /// The settlement tx must be unused and the contract's balance must really hold it. Shark only.
+    pub fn return_x402(&mut self, settlement: Settlement) -> Promise {
+        self.only(&self.shark.clone());
+        self.begin_x402("", &settlement.tx_hash);
+        self.balance_check().then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_x402_return(settlement))
+    }
+
+    #[private]
+    pub fn on_x402_return(&mut self, settlement: Settlement, #[callback_result] balance: Result<U128, PromiseError>) {
+        self.end_x402("", &settlement.tx_hash);
+        if !matches!(balance, Ok(b) if b.0 >= self.accounted + settlement.amount.0) {
+            emit("x402_rejected", json!({ "tx": settlement.tx_hash, "reason": "E_BALANCE_NOT_RECEIVED" }));
+            return;
+        }
+        self.x402_used_tx.insert(settlement.tx_hash.clone());
+        self.accounted += settlement.amount.0;
+        emit("x402_returned", json!({ "tx": settlement.tx_hash, "payer": settlement.payer, "amount": settlement.amount }));
+        self.payout(&settlement.payer, settlement.amount.0, 0, "x402_return").detach();
+    }
+
     // ---------- treasury (SRD FR-62, FR-63, FR-75) ----------
 
     /// Once per UTC day: `min(daily_budget, reserve - floor)` to Shark's wallet. Anyone.
@@ -912,8 +991,9 @@ impl Contract {
         }
     }
 
-    /// Method 1 checks (FR-06). Err carries the contract error code for `payment_returned`.
-    fn try_pay(&mut self, sender: &AccountId, amount: u128, b64: &str) -> Result<u64, &'static str> {
+    /// The checks every payment method shares: state, Shark's signature, network, band, floor, expiry and one-time
+    /// use (FR-06). Err carries the contract error code (`payment_returned` for method 1, a panic for method 3).
+    fn check_quote(&self, q: &Quote, sig: &str) -> Result<(), &'static str> {
         if self.closed {
             return Err("E_CLOSED");
         }
@@ -923,29 +1003,16 @@ impl Contract {
         if self.strikes >= self.config.strike_threshold {
             return Err("E_CAGED");
         }
-        let raw = near_sdk::base64::Engine::decode(&near_sdk::base64::engine::general_purpose::STANDARD, b64).map_err(|_| "E_BAD_QUOTE_SIG")?;
-        let m: PayMsg = serde_json::from_slice(&raw).map_err(|_| "E_BAD_QUOTE_SIG")?;
-        let q = m.quote;
-        let sig = m
-            .sig
+        let sig = sig
             .strip_prefix("ed25519:")
             .and_then(|s| near_sdk::bs58::decode(s).into_vec().ok())
             .and_then(|v| <[u8; 64]>::try_from(v).ok())
             .ok_or("E_BAD_QUOTE_SIG")?;
         let pk: [u8; 32] = self.quote_pubkey.as_bytes()[1..].try_into().map_err(|_| "E_BAD_QUOTE_SIG")?;
-        let canonical = serde_json::to_string(&q).map_err(|_| "E_BAD_QUOTE_SIG")?;
+        let canonical = serde_json::to_string(q).map_err(|_| "E_BAD_QUOTE_SIG")?;
         let digest = env::sha256_array(format!("{QUOTE_DOMAIN}{canonical}").as_bytes());
-        if !env::ed25519_verify(&sig, &digest, &pk) {
+        if !env::ed25519_verify(&sig, &digest, &pk) || q.network != self.network {
             return Err("E_BAD_QUOTE_SIG");
-        }
-        if q.network != self.network {
-            return Err("E_BAD_QUOTE_SIG");
-        }
-        if *sender != q.payer {
-            return Err("E_WRONG_PAYER");
-        }
-        if amount != q.price.0 {
-            return Err("E_WRONG_AMOUNT");
         }
         let band = self.config.band(q.job_type);
         if q.price.0 < band.band_min.0 || q.price.0 > band.band_max.0 {
@@ -960,6 +1027,25 @@ impl Contract {
         if self.used_quotes.contains_key(&q.quote_id) {
             return Err("E_QUOTE_USED");
         }
+        Ok(())
+    }
+
+    /// Method 1 (FR-06): the quote came in `msg`, the sender must be the payer and the amount exactly the price.
+    fn try_pay(&mut self, sender: &AccountId, amount: u128, b64: &str) -> Result<u64, &'static str> {
+        let raw = near_sdk::base64::Engine::decode(&near_sdk::base64::engine::general_purpose::STANDARD, b64).map_err(|_| "E_BAD_QUOTE_SIG")?;
+        let m: PayMsg = serde_json::from_slice(&raw).map_err(|_| "E_BAD_QUOTE_SIG")?;
+        self.check_quote(&m.quote, &m.sig)?;
+        if *sender != m.quote.payer {
+            return Err("E_WRONG_PAYER");
+        }
+        if amount != m.quote.price.0 {
+            return Err("E_WRONG_AMOUNT");
+        }
+        Ok(self.open_job(m.quote, "quote"))
+    }
+
+    /// Creates the Paid job for a checked quote and marks the quote used.
+    fn open_job(&mut self, q: Quote, method: &str) -> u64 {
         let id = self.next_job;
         self.next_job += 1;
         self.used_quotes.insert(q.quote_id.clone(), id);
@@ -974,6 +1060,7 @@ impl Contract {
                 input_hash: q.input_hash,
                 brief_hash: q.brief_hash,
                 referrer: q.referrer,
+                method: method.into(),
                 state: JobState::Paid,
                 paid_at: now_secs(),
                 worker: None,
@@ -1005,7 +1092,7 @@ impl Contract {
             },
         );
         self.open_jobs += 1;
-        Ok(id)
+        id
     }
 
     fn pay_worker_and_reviewer(&mut self, j: &mut Job, worker: &AccountId, reviewer: &AccountId) {
@@ -1014,6 +1101,28 @@ impl Contract {
         // shortcut: only NEAR payouts; Raven's Base payout via Chain Signatures comes with that slice (FR-60)
         self.payout(worker, j.worker_fee.0, j.id, "worker").detach();
         self.payout(reviewer, j.review_fee.0, j.id, "reviewer").detach();
+    }
+
+    /// Marks a quote and a settlement tx as in flight; both must be fresh (an x402 payment counts once).
+    fn begin_x402(&mut self, quote_key: &str, tx_hash: &str) {
+        let tx = format!("t:{tx_hash}");
+        require!(!self.x402_used_tx.contains(tx_hash) && !self.x402_pending.contains(&tx), "E_QUOTE_USED");
+        require!(quote_key.is_empty() || !self.x402_pending.contains(quote_key), "E_QUOTE_USED");
+        self.x402_pending.insert(tx);
+        if !quote_key.is_empty() {
+            self.x402_pending.insert(quote_key.to_string());
+        }
+    }
+
+    fn end_x402(&mut self, quote_key: &str, tx_hash: &str) {
+        self.x402_pending.remove(&format!("t:{tx_hash}"));
+        if !quote_key.is_empty() {
+            self.x402_pending.remove(quote_key);
+        }
+    }
+
+    fn balance_check(&self) -> Promise {
+        ext_ft::ext(self.usdc.clone()).with_static_gas(GAS_VIEW).ft_balance_of(env::current_account_id())
     }
 
     fn reserve_floor(&self) -> u128 {

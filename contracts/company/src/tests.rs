@@ -71,11 +71,15 @@ fn quote(id: &str, price: u128, payer: &str) -> Quote {
     }
 }
 
-/// What Shark sends in `msg` (API §1.2).
-fn pay_msg(q: &Quote, k: &SigningKey) -> String {
+fn quote_sig(q: &Quote, k: &SigningKey) -> String {
     let canonical = serde_json::to_string(q).unwrap();
     let digest = env::sha256_array(format!("{QUOTE_DOMAIN}{canonical}").as_bytes());
-    let sig = format!("ed25519:{}", near_sdk::bs58::encode(k.sign(&digest).to_bytes()).into_string());
+    format!("ed25519:{}", near_sdk::bs58::encode(k.sign(&digest).to_bytes()).into_string())
+}
+
+/// What Shark sends in `msg` (API §1.2).
+fn pay_msg(q: &Quote, k: &SigningKey) -> String {
+    let sig = quote_sig(q, k);
     let body = json!({ "quote": q, "sig": sig }).to_string();
     format!("pay:{}", near_sdk::base64::Engine::encode(&near_sdk::base64::engine::general_purpose::STANDARD, body))
 }
@@ -777,4 +781,181 @@ fn a_failed_refund_reopens_the_job() {
     ctx("sharkco.testnet", 2_000);
     c.on_payout(1, acc("buyer.testnet"), U128(600_000), "refund".into(), Err(PromiseError::Failed));
     assert_eq!((c.get_job(1).unwrap().state, c.get_stats().open_jobs), (JobState::RefundDue, 1));
+}
+
+// ---------- method 3: x402 ----------
+
+fn settlement(tx: &str, payer: &str, amount: u128) -> Settlement {
+    Settlement { tx_hash: tx.into(), payer: acc(payer), amount: U128(amount) }
+}
+
+/// Shark reports a settled x402 payment (the balance check is then in flight).
+fn x402_mark(c: &mut Contract, q: &Quote, tx: &str) {
+    ctx("shark.testnet", 1_050);
+    c.mark_paid_x402(q.clone(), quote_sig(q, &key()), settlement(tx, q.payer.as_str(), q.price.0)).detach();
+}
+
+/// The callback with the contract's USDC balance as the token reported it.
+fn x402_balance(c: &mut Contract, q: &Quote, tx: &str, balance: u128) {
+    ctx("sharkco.testnet", 1_051);
+    c.on_x402_balance(q.clone(), settlement(tx, q.payer.as_str(), q.price.0), Ok(U128(balance)));
+}
+
+#[test]
+fn an_x402_payment_becomes_a_paid_job_once_the_balance_grew() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    x402_mark(&mut c, &q, "tx1");
+    x402_balance(&mut c, &q, "tx1", 600_000);
+    let j = c.get_job_by_quote("q_X".into()).unwrap();
+    assert_eq!((j.state, j.method.as_str(), j.price.0), (JobState::Paid, "x402", 600_000));
+    let s = c.get_stats();
+    assert_eq!((s.accounted.0, s.open_jobs), (600_000, 1));
+}
+
+#[test]
+fn an_x402_payment_is_refused_when_the_balance_did_not_grow() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    x402_mark(&mut c, &q, "tx1");
+    x402_balance(&mut c, &q, "tx1", 599_999);
+    assert!(c.get_job_by_quote("q_X".into()).is_none());
+    assert_eq!(c.get_stats().accounted.0, 0);
+    // nothing is stuck: the same quote can be reported again once the money is really there
+    x402_mark(&mut c, &q, "tx2");
+    x402_balance(&mut c, &q, "tx2", 600_000);
+    assert!(c.get_job_by_quote("q_X".into()).is_some());
+}
+
+#[test]
+fn the_balance_check_counts_money_the_contract_already_owes() {
+    let mut c = setup();
+    assert_eq!(pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000), 0);
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    x402_mark(&mut c, &q, "tx1");
+    x402_balance(&mut c, &q, "tx1", 1_199_999);
+    assert!(c.get_job_by_quote("q_X".into()).is_none());
+    x402_mark(&mut c, &q, "tx2");
+    x402_balance(&mut c, &q, "tx2", 1_200_000);
+    assert!(c.get_job_by_quote("q_X".into()).is_some());
+}
+
+#[test]
+fn a_pause_between_the_report_and_the_balance_creates_no_job() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    x402_mark(&mut c, &q, "tx1");
+    ctx("guardian.testnet", 1_050);
+    c.pause();
+    x402_balance(&mut c, &q, "tx1", 600_000);
+    assert!(c.get_job_by_quote("q_X".into()).is_none());
+}
+
+#[test]
+#[should_panic(expected = "E_QUOTE_USED")]
+fn a_quote_cannot_be_paid_twice_by_x402() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    x402_mark(&mut c, &q, "tx1");
+    x402_balance(&mut c, &q, "tx1", 600_000);
+    x402_mark(&mut c, &q, "tx2");
+}
+
+#[test]
+#[should_panic(expected = "E_QUOTE_USED")]
+fn a_quote_in_flight_cannot_be_reported_again() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    x402_mark(&mut c, &q, "tx1");
+    x402_mark(&mut c, &q, "tx2");
+}
+
+#[test]
+#[should_panic(expected = "E_QUOTE_USED")]
+fn a_settlement_tx_counts_once() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    x402_mark(&mut c, &q, "tx1");
+    x402_balance(&mut c, &q, "tx1", 600_000);
+    x402_mark(&mut c, &quote("q_Y", 600_000, "buyer.testnet"), "tx1");
+}
+
+#[test]
+#[should_panic(expected = "E_UNAUTHORIZED")]
+fn only_shark_reports_x402() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    ctx("stranger.testnet", 1_050);
+    c.mark_paid_x402(q.clone(), quote_sig(&q, &key()), settlement("tx1", "buyer.testnet", 600_000)).detach();
+}
+
+#[test]
+#[should_panic(expected = "E_WRONG_PAYER")]
+fn x402_settlement_must_come_from_the_quote_payer() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    ctx("shark.testnet", 1_050);
+    c.mark_paid_x402(q.clone(), quote_sig(&q, &key()), settlement("tx1", "stranger.testnet", 600_000)).detach();
+}
+
+#[test]
+#[should_panic(expected = "E_WRONG_AMOUNT")]
+fn x402_settlement_must_be_the_price() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    ctx("shark.testnet", 1_050);
+    c.mark_paid_x402(q.clone(), quote_sig(&q, &key()), settlement("tx1", "buyer.testnet", 500_000)).detach();
+}
+
+#[test]
+#[should_panic(expected = "E_BAD_QUOTE_SIG")]
+fn x402_needs_a_real_quote_signature() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    ctx("shark.testnet", 1_050);
+    c.mark_paid_x402(q.clone(), quote_sig(&q, &SigningKey::from_bytes(&[9u8; 32])), settlement("tx1", "buyer.testnet", 600_000)).detach();
+}
+
+#[test]
+#[should_panic(expected = "E_QUOTE_EXPIRED")]
+fn x402_refuses_an_expired_quote() {
+    let mut c = setup();
+    let q = quote("q_X", 600_000, "buyer.testnet");
+    ctx("shark.testnet", 2_001);
+    c.mark_paid_x402(q.clone(), quote_sig(&q, &key()), settlement("tx1", "buyer.testnet", 600_000)).detach();
+}
+
+#[test]
+fn an_unmatched_x402_payment_is_sent_back_once() {
+    let mut c = setup();
+    ctx("shark.testnet", 1_050);
+    c.return_x402(settlement("tx9", "buyer.testnet", 600_000)).detach();
+    ctx("sharkco.testnet", 1_051);
+    c.on_x402_return(settlement("tx9", "buyer.testnet", 600_000), Ok(U128(600_000)));
+    assert_eq!(c.get_stats().accounted.0, 0); // counted in, then paid straight back out
+    let again = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx("shark.testnet", 1_052);
+        c.return_x402(settlement("tx9", "buyer.testnet", 600_000)).detach();
+    }));
+    assert!(again.is_err(), "the same settlement is returned once");
+}
+
+#[test]
+fn an_x402_return_needs_the_balance_to_be_there() {
+    let mut c = setup();
+    ctx("shark.testnet", 1_050);
+    c.return_x402(settlement("tx9", "buyer.testnet", 600_000)).detach();
+    ctx("sharkco.testnet", 1_051);
+    c.on_x402_return(settlement("tx9", "buyer.testnet", 600_000), Ok(U128(599_999)));
+    assert_eq!(c.get_stats().accounted.0, 0);
+    ctx("shark.testnet", 1_052);
+    c.return_x402(settlement("tx9", "buyer.testnet", 600_000)).detach(); // not used up, so it can be tried again
+}
+
+#[test]
+#[should_panic(expected = "E_UNAUTHORIZED")]
+fn only_shark_returns_x402() {
+    let mut c = setup();
+    ctx("stranger.testnet", 1_050);
+    c.return_x402(settlement("tx9", "buyer.testnet", 600_000)).detach();
 }

@@ -13,6 +13,7 @@ import { loadConfig } from "../src/config";
 import { agentMessage } from "../src/agents";
 import { bidDigest, tick } from "../src/loop";
 import { openStore } from "../src/store";
+import type { Facilitator } from "../src/x402";
 
 const USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
 const NOW = 1_793_500_000;
@@ -73,6 +74,8 @@ let paidQuotes: Map<string, number>;
 let complaints: { job: number; hash: string }[];
 let txs: string[];
 let keeperTxs: string[];
+/** What the contract does with an x402 report: create the job, refuse it, or accept without creating one */
+let x402Mode: "ok" | "throw" | "no_job";
 
 const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   serviceState: async () => "ok",
@@ -115,12 +118,23 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   payOwners: async () => (keeperTxs.push("pay_owners"), "TxOwners"),
   owed: async () => [],
   retryOwed: async (id) => (keeperTxs.push(`retry_owed ${id}`), "TxRetry"),
+  markPaidX402: async (quote, _sig, s) => {
+    txs.push(`mark_paid_x402 ${quote.quote_id} ${s.tx_hash}`);
+    if (x402Mode === "throw") throw new Error("contract refused");
+    if (x402Mode === "ok") {
+      const id = jobs.size + 77;
+      job(id, { quote_id: quote.quote_id, method: "x402", state: "paid", worker: null, worker_fee: "0", codes: [], awarded_at: null, delivered_at: null, reviewed_at: null, work_deadline: 0 });
+      paidQuotes.set(quote.quote_id, id);
+    }
+    return "TxMark";
+  },
+  returnX402: async (s) => (txs.push(`return_x402 ${s.tx_hash}`), "TxReturn"),
   ...over,
 });
 
 let app: ReturnType<typeof createApp>;
 let store: ReturnType<typeof openStore>;
-const makeApp = (chain = fakeChain(), now = () => NOW) => createApp({ config, chain, store, now, fetchImpl: async () => new Response("<html><body><p>Hello from example.com</p></body></html>", { headers: { "content-type": "text/html" } }) });
+const makeApp = (chain = fakeChain(), now = () => NOW, facilitator?: Facilitator) => createApp({ config, chain, store, now, facilitator, fetchImpl: async () => new Response("<html><body><p>Hello from example.com</p></body></html>", { headers: { "content-type": "text/html" } }) });
 
 beforeEach(() => {
   jobs = new Map();
@@ -128,6 +142,7 @@ beforeEach(() => {
   complaints = [];
   txs = [];
   keeperTxs = [];
+  x402Mode = "ok";
   store = openStore(mkdtempSync(join(tmpdir(), "shark-")));
   app = makeApp();
 });
@@ -164,6 +179,7 @@ function job(id: number, over: Partial<ContractJob> = {}): ContractJob {
     input_hash: "sha256:i",
     brief_hash: "sha256:b",
     referrer: "ref-agent.testnet",
+    method: "quote",
     state: "delivered",
     paid_at: NOW - 600,
     worker: "crab-worker.testnet",
@@ -832,5 +848,144 @@ describe("daily and owed keepers", () => {
     now += 3_600;
     await tick(deps());
     expect(keeperTxs).toEqual(["retry_owed 1", "retry_owed 2", "fund_shark", "pay_owners", "retry_owed 1", "retry_owed 2"]); // an hour later is also past 00:05
+  });
+});
+
+describe("x402 (method 3, FR-12)", () => {
+  const dec = (h: string | null) => JSON.parse(Buffer.from(h ?? "", "base64").toString("utf8"));
+  const enc = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64");
+
+  function fakeFacilitator(over: Partial<Facilitator> = {}) {
+    const calls: string[] = [];
+    const f: Facilitator = {
+      verify: async () => (calls.push("verify"), { isValid: true, payer: "demo-buyer.testnet" }),
+      settle: async () => (calls.push("settle"), { success: true, transaction: "TxSettle", network: "near:testnet", payer: "demo-buyer.testnet" }),
+      ...over,
+    };
+    return { f, calls };
+  }
+  /** Ask for a quote, read the x402 requirement from its header, and build the retry's PAYMENT-SIGNATURE. */
+  async function quoted(f: Facilitator, now = () => NOW) {
+    app = makeApp(fakeChain(), now, f);
+    const res = await post("/v1/orders", order(), { "Idempotency-Key": "x1" });
+    const required = dec(res.headers.get("PAYMENT-REQUIRED"));
+    const q = await parsed(Quote402, res);
+    const payload = { x402Version: 2, resource: required.resource, accepted: required.accepts[0], payload: { signedDelegateAction: "AAAA" } };
+    return { q, required, payload, header: enc(payload) };
+  }
+  const retry = (header: string) => post("/v1/orders", order(), { "Idempotency-Key": "x1", "PAYMENT-SIGNATURE": header });
+
+  it("every 402 also carries an x402 v2 PAYMENT-REQUIRED for the exact quote", async () => {
+    const { q, required } = await quoted(fakeFacilitator().f);
+    expect(required).toEqual({
+      x402Version: 2,
+      error: "PAYMENT-SIGNATURE header is required",
+      resource: { url: "http://localhost:8787/v1/orders", description: `Shark & Co. summary job ${q.quoteId}`, mimeType: "application/json" },
+      accepts: [{ scheme: "exact", network: "near:testnet", amount: "600000", asset: USDC, payTo: "sharkco.testnet", maxTimeoutSeconds: 120, extra: { quoteId: q.quoteId, briefHash: q.briefHash } }],
+    });
+  });
+
+  it("a signed retry is verified, settled, reported to the contract and answered 200 with PAYMENT-RESPONSE", async () => {
+    const fac = fakeFacilitator();
+    const { q, header } = await quoted(fac.f);
+    const res = await retry(header);
+    expect(res.status).toBe(200);
+    expect(dec(res.headers.get("PAYMENT-RESPONSE"))).toEqual({ success: true, transaction: "TxSettle", network: "near:testnet", payer: "demo-buyer.testnet" });
+    expect(await parsed(OrderAccepted, res)).toMatchObject({ status: "paid", payment: { method: "x402", tx: "TxSettle" } });
+    expect(fac.calls).toEqual(["verify", "settle"]);
+    expect(txs).toEqual([`mark_paid_x402 ${q.quoteId} TxSettle`]);
+    // the quote now reads as paid by x402, and the order carries its payment tx
+    expect(await parsed(QuoteStatus, await get(`/v1/quotes/${q.quoteId}`))).toMatchObject({ method: "x402", status: "PAID", paymentTx: "TxSettle" });
+    const o = await parsed(Order, await get(`/v1/orders/${(await (await get(`/v1/quotes/${q.quoteId}`)).json()).orderId}`));
+    expect(o.proof.paymentTx).toBe("TxSettle");
+  });
+
+  it("retrying an already paid quote answers 202 without settling again", async () => {
+    const fac = fakeFacilitator();
+    const { header } = await quoted(fac.f);
+    expect((await retry(header)).status).toBe(200);
+    fac.calls.length = 0;
+    const again = await retry(header);
+    expect(again.status).toBe(202);
+    expect(await parsed(OrderAccepted, again)).toMatchObject({ status: "paid" });
+    expect(fac.calls).toEqual([]);
+  });
+
+  describe("refusals (x402_invalid), each with a fresh PAYMENT-REQUIRED carrying the error", () => {
+    const expectInvalid = async (res: Response, reason: string, withHeader = true) => {
+      expect(res.status).toBe(402);
+      const e = await parsed(ApiError, res.clone());
+      expect(e).toMatchObject({ error: "x402_invalid", charged: false, details: { reason } });
+      if (withHeader) expect(dec(res.headers.get("PAYMENT-REQUIRED")).error).toBe(reason);
+    };
+    it("malformed, unknown quote, wrong network, changed requirement", async () => {
+      const fac = fakeFacilitator();
+      const { payload } = await quoted(fac.f);
+      await expectInvalid(await retry("not base64 json"), "malformed", false);
+      await expectInvalid(await retry(enc({ ...payload, accepted: { ...payload.accepted, extra: { ...payload.accepted.extra, quoteId: "q_NOPE" } } })), "unknown_quote", false);
+      await expectInvalid(await retry(enc({ ...payload, accepted: { ...payload.accepted, network: "near:mainnet" } })), "network");
+      await expectInvalid(await retry(enc({ ...payload, accepted: { ...payload.accepted, amount: "1" } })), "requirement_mismatch");
+      await expectInvalid(await retry(enc({ ...payload, accepted: { ...payload.accepted, payTo: "thief.testnet" } })), "requirement_mismatch");
+      expect(fac.calls).toEqual([]); // nothing reached the facilitator
+    });
+    it("the facilitator's own verify refusal is passed on", async () => {
+      const fac = fakeFacilitator({ verify: async () => ({ isValid: false, invalidReason: "insufficient_funds" }) });
+      const { header } = await quoted(fac.f);
+      await expectInvalid(await retry(header), "insufficient_funds");
+      expect(txs).toEqual([]);
+    });
+    it("x402 is not enabled without a facilitator", async () => {
+      app = createApp({ config: { ...config, x402FacilitatorUrl: null }, chain: fakeChain(), store, now: () => NOW });
+      const res = await post("/v1/orders", order());
+      expect(res.headers.get("PAYMENT-REQUIRED")).toBeNull();
+      await expectInvalid(await retry(enc({ x402Version: 2 })), "not_enabled", false);
+    });
+  });
+
+  it("a settlement failure is x402_settlement_failed with the facilitator's reason", async () => {
+    const fac = fakeFacilitator({ settle: async () => ({ success: false, errorReason: "delegate_action_expired" }) });
+    const { header } = await quoted(fac.f);
+    const res = await retry(header);
+    expect(res.status).toBe(402);
+    expect(await parsed(ApiError, res)).toMatchObject({ error: "x402_settlement_failed", details: { reason: "delegate_action_expired" } });
+    expect(txs).toEqual([]);
+  });
+
+  it("a quote with under 150 s left is 410, before anything is settled", async () => {
+    const fac = fakeFacilitator();
+    const { header } = await quoted(fac.f);
+    app = makeApp(fakeChain(), () => NOW + 451, fac.f); // 600 s ttl, 149 s left
+    const res = await retry(header);
+    expect(res.status).toBe(410);
+    expect((await parsed(ApiError, res)).error).toBe("quote_expired");
+    expect(fac.calls).toEqual([]);
+  });
+
+  it("a paused service takes no x402 money", async () => {
+    const fac = fakeFacilitator();
+    const { header } = await quoted(fac.f);
+    app = makeApp(fakeChain({ serviceState: async () => "paused" }), () => NOW, fac.f);
+    const res = await retry(header);
+    expect(res.status).toBe(503);
+    expect(fac.calls).toEqual([]);
+  });
+
+  it("money that landed but could not become a job is sent back: the contract refused, or made no job", async () => {
+    for (const mode of ["throw", "no_job"] as const) {
+      txs = [];
+      x402Mode = mode;
+      const { q, header } = await quoted(fakeFacilitator().f);
+      const res = await retry(header);
+      expect(res.status).toBe(402);
+      expect(await parsed(ApiError, res)).toMatchObject({ error: "x402_settlement_failed", charged: false, details: { reason: "returned" } });
+      expect(txs).toEqual([`mark_paid_x402 ${q.quoteId} TxSettle`, "return_x402 TxSettle"]);
+    }
+  });
+
+  it("an unreachable facilitator is a 502", async () => {
+    const { header } = await quoted(fakeFacilitator({ verify: async () => { throw new Error("down"); } }).f);
+    const res = await retry(header);
+    expect(res.status).toBe(502);
+    expect((await parsed(ApiError, res)).error).toBe("upstream_unavailable");
   });
 });

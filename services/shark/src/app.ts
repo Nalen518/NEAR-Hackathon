@@ -8,11 +8,12 @@ import { companyOf, pricesOf, serviceStateOf } from "./company";
 import type { Config } from "./config";
 import { HttpError, sendError } from "./errors";
 import { orderRoutes } from "./orders";
+import { httpFacilitator, type Facilitator } from "./x402";
 import type { Store } from "./store";
 
-export type Deps = { config: Config; chain: Chain; store: Store; now?: () => number; fetchImpl?: typeof fetch };
+export type Deps = { config: Config; chain: Chain; store: Store; now?: () => number; fetchImpl?: typeof fetch; facilitator?: Facilitator };
 
-export function createApp({ config, chain, store, now = () => Math.floor(Date.now() / 1000), fetchImpl }: Deps) {
+export function createApp({ config, chain, store, now = () => Math.floor(Date.now() / 1000), fetchImpl, facilitator }: Deps) {
   const app = new Hono();
 
   app.use(
@@ -63,7 +64,8 @@ export function createApp({ config, chain, store, now = () => Math.floor(Date.no
     return c.json({ network: config.networkId, options } satisfies PaymentOptions);
   });
 
-  orderRoutes(app, { config, chain, store, now, fetchImpl });
+  const x402 = facilitator ?? (config.x402FacilitatorUrl ? httpFacilitator(config.x402FacilitatorUrl, config.x402ApiKey) : undefined);
+  orderRoutes(app, { config, chain, store, now, fetchImpl, facilitator: x402 });
   agentRoutes(app, { config, chain, store, now });
 
   return app;
