@@ -3,6 +3,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { StoredReceipt } from "./events";
 
 export type QuoteRow = {
   id: string;
@@ -52,7 +53,12 @@ export function openStore(dir: string) {
     create table if not exists complaints (payer text, at int);
     create table if not exists auctions (job_id int primary key, row text);
     create table if not exists kv (key text primary key, value text);
+    create table if not exists receipts (receipt_id text primary key, tx text, method text, ok int, at int, predecessor text, args text, job int, quote text);
+    create index if not exists receipts_job on receipts(job);
+    create index if not exists receipts_quote on receipts(quote);
   `);
+  type ReceiptRow = Omit<StoredReceipt, "ok" | "args"> & { ok: number; args: string };
+  const toReceipt = (r: ReceiptRow): StoredReceipt => ({ ...r, ok: !!r.ok, args: JSON.parse(r.args) });
   const blob = (hash: string) => join(dir, "files", hash.replace(/^sha256:/, ""));
   return {
     putQuote: (q: QuoteRow) =>
@@ -94,6 +100,23 @@ export function openStore(dir: string) {
     /** Newest first. */
     auctions: (limit: number): AuctionRow[] =>
       (db.prepare("select row from auctions order by json_extract(row, '$.at') desc, job_id desc limit ?").all(limit) as { row: string }[]).map((r) => JSON.parse(r.row)),
+    /** false when this receipt was stored before */
+    putReceipt: (r: StoredReceipt) =>
+      Number(
+        db
+          .prepare("insert or ignore into receipts values (?,?,?,?,?,?,?,?,?)")
+          .run(r.receipt_id, r.tx, r.method, r.ok ? 1 : 0, r.at, r.predecessor, JSON.stringify(r.args), r.job, r.quote).changes,
+      ) > 0,
+    /** Oldest first: the calls about this job. */
+    receiptsForJob: (job: number) => (db.prepare("select * from receipts where job = ? order by at, rowid").all(job) as ReceiptRow[]).map(toReceipt),
+    /** The payment that carried this quote (ft_on_transfer with pay:), if the contract received one. */
+    payReceiptForQuote: (quote: string) => {
+      const r = db.prepare("select * from receipts where quote = ? and method = 'ft_on_transfer' order by at desc limit 1").get(quote) as ReceiptRow | undefined;
+      return r && toReceipt(r);
+    },
+    /** Newest first. */
+    recentReceipts: (methods: string[], limit: number) =>
+      (db.prepare(`select * from receipts where ok = 1 and method in (${methods.map(() => "?").join(",")}) order by at desc, rowid desc limit ?`).all(...methods, limit) as ReceiptRow[]).map(toReceipt),
     kv: (key: string) => (db.prepare("select value from kv where key = ?").get(key) as { value: string } | undefined)?.value ?? null,
     setKv: (key: string, value: string) => db.prepare("insert or replace into kv values (?, ?)").run(key, value),
     putAuction: (a: AuctionRow) => db.prepare("insert or replace into auctions values (?, ?)").run(a.job_id, JSON.stringify(a)),

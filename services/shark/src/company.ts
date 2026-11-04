@@ -1,8 +1,10 @@
 // GET /v1/prices and GET /v1/company (API §1.7, §1.9, v2.3 P6 core). Every number comes from the contract;
 // a section whose data has no live source yet says so with `sample: true`, and the web labels it SAMPLE.
-import { fromBase, JobType, type AuctionRecord, type Company, type Incident, type LedgerJob, type Prices, type Worker, type WorkerId } from "@shark/shared";
+import { fromBase, JobType, type AuctionRecord, type Company, type Incident, type LedgerJob, type Payout, type Prices, type Worker, type WorkerId } from "@shark/shared";
 import type { Chain, ContractJob } from "./chain";
 import type { Config } from "./config";
+import { isReturned } from "./events";
+import { payoutsOf, reviewsBefore } from "./ledger";
 import type { Store } from "./store";
 
 const usdc = (base: string | bigint) => fromBase(BigInt(base));
@@ -22,16 +24,20 @@ export async function pricesOf(chain: Chain, store: Store, now: number): Promise
   ) as Prices["types"];
   const recent = store.recentQuotes(20);
   await Promise.all(recent.filter((q) => !paidQuotes.has(q.id)).map(async (q) => (await chain.jobByQuote(q.id)) && paidQuotes.add(q.id)));
-  // shortcut: "returned" and its reason need the payment_returned event; until the event reader an unpaid quote is open or expired
-  const recentQuotes: Prices["recentQuotes"] = recent.map((q) => ({
-    at: iso(q.created_at),
-    jobType: q.job_type as JobType,
-    price: usdc(q.price),
-    reason: q.reason,
-    ...(paidQuotes.has(q.id) ? { status: "paid" as const } : now > q.expires_at ? { status: "expired" as const } : {}),
-    returnReason: null,
-    tx: null,
-  }));
+  // shortcut: the indexer gives no return value, so a returned payment has no reason (returnReason stays null)
+  const recentQuotes: Prices["recentQuotes"] = recent.map((q) => {
+    const pay = store.payReceiptForQuote(q.id);
+    const paid = paidQuotes.has(q.id);
+    return {
+      at: iso(q.created_at),
+      jobType: q.job_type as JobType,
+      price: usdc(q.price),
+      reason: q.reason,
+      ...(paid ? { status: "paid" as const } : isReturned(pay, false, now) ? { status: "returned" as const } : now > q.expires_at ? { status: "expired" as const } : {}),
+      returnReason: null,
+      tx: pay?.tx ?? null,
+    };
+  });
   return { types, recentQuotes };
 }
 
@@ -83,6 +89,10 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
   const done = week.filter((j) => j.state === "finalized").map(split);
   const sum = (k: keyof ReturnType<typeof split>) => done.reduce((a, s) => a + s[k], 0n);
 
+  const workerPayoutTx = (j: ContractJob) => {
+    const all = store.receiptsForJob(j.id);
+    return all.filter((r) => payoutsOf(j, r, reviewsBefore(all, r)).some((p) => p.kind === "worker")).at(-1)?.tx ?? null;
+  };
   const ledger: LedgerJob[] = jobs
     .slice(-20)
     .reverse()
@@ -97,7 +107,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
         status: j.state,
         referral: j.state === "finalized" ? usdc(s.referral) : null,
         attestationUrl: null,
-        workerPayoutTx: null,
+        workerPayoutTx: workerPayoutTx(j),
         at: iso(j.paid_at),
         reserveDelta: j.state === "finalized" ? usdc(s.reserve) : null,
         refund: j.state === "refunded" || j.state === "refund_due" ? usdc(s.price) : null,
@@ -146,6 +156,37 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
     })
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 20);
+
+  // payouts from the calls that made them, newest first; fees held for an Unresolved job show as held
+  const nameOf = (account: string) => (account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : account === config.agents.owl ? "owl" : account);
+  const madePayouts: Payout[] = store.recentReceipts(["on_review", "pay_refund", "release_unresolved", "finalize"], 60).flatMap((r) => {
+    const j = r.job ? byId.get(r.job) : undefined;
+    if (!j) return [];
+    const all = store.receiptsForJob(j.id);
+    return payoutsOf(j, r, reviewsBefore(all, r)).map((p) => ({
+      at: iso(r.at),
+      orderId: `j_${String(j.id).padStart(6, "0")}`,
+      to: nameOf(p.to),
+      kind: p.kind,
+      amount: usdc(p.amount),
+      chain: "near" as const,
+      tx: r.tx,
+      held: false,
+    }));
+  });
+  const held: Payout[] = jobs
+    .filter((j) => j.state === "unresolved" && j.worker && j.unresolved_since)
+    .map((j) => ({
+      at: iso(j.unresolved_since!),
+      orderId: `j_${String(j.id).padStart(6, "0")}`,
+      to: nameOf(j.worker!),
+      kind: "held" as const,
+      amount: usdc(j.worker_fee),
+      chain: "near" as const,
+      tx: store.receiptsForJob(j.id).filter((r) => r.ok && r.method === "mark_unresolved").at(-1)?.tx ?? null,
+      held: true,
+    }));
+  const payouts: Payout[] = [...madePayouts, ...held].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 20);
 
   const workerCards: Worker[] = workers.flatMap((w) => {
     const id = idOf(w.id);
@@ -238,8 +279,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
       changedByProposal: null,
       changeTx: null,
     },
-    // shortcut: payouts need tx hashes from NEP-297 events (an indexer); empty and marked sample until then
-    payouts: [],
+    payouts,
     auctions,
     incidents,
     sample: {
@@ -252,7 +292,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
       recentJobs: false,
       owners: true,
       config: false,
-      payouts: true,
+      payouts: !config.eventsUrl,
       guardian: false,
       auctions: false,
       incidents: false,

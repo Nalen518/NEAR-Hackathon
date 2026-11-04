@@ -12,6 +12,8 @@ export type Config = {
   usdcFaucetUrl: string | null;
   x402FacilitatorUrl: string | null;
   x402ApiKey: string | null;
+  /** Indexer that lists the calls our contract received (events.ts); null turns the reader off */
+  eventsUrl: string | null;
   /** Where agents reach this Shark, for the x402 `resource` (ARCHITECTURE §9 `PUBLIC_BASE_URL`) */
   publicBaseUrl: string;
   webOrigins: string[];
@@ -51,6 +53,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     usdcFaucetUrl: env[`${NET}_USDC_FAUCET_URL`] || null,
     x402FacilitatorUrl: env[`${NET}_X402_FACILITATOR_URL`] || null,
     x402ApiKey: env[`${NET}_X402_API_KEY`] || null,
+    eventsUrl: (env[`${NET}_EVENTS_URL`] ?? (network === "testnet" ? "https://api-testnet.nearblocks.io" : "https://api.nearblocks.io")) === "off" ? null : (env[`${NET}_EVENTS_URL`] ?? (network === "testnet" ? "https://api-testnet.nearblocks.io" : "https://api.nearblocks.io")),
     publicBaseUrl: (env.PUBLIC_BASE_URL ?? "http://localhost:8787").replace(/\/$/, ""),
     webOrigins: (env.WEB_ORIGINS ?? "http://localhost:3100,http://localhost:3000").split(",").map((s) => s.trim()).filter(Boolean),
     version: env.SHARK_VERSION ?? "0.1.0",

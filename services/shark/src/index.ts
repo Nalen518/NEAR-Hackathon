@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app";
 import { rpcChain } from "./chain";
 import { loadConfig } from "./config";
+import { nearblocksSource } from "./events";
 import { tick } from "./loop";
 import { openStore } from "./store";
 
@@ -18,6 +19,7 @@ const chain = rpcChain({
 const store = openStore(config.fileStorePath);
 const now = () => Math.floor(Date.now() / 1000);
 const app = createApp({ config, chain, store, now });
+const receipts = config.eventsUrl ? nearblocksSource(config.eventsUrl, config.contractId) : undefined;
 const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port }, () => console.log(JSON.stringify({ level: "info", msg: "shark listening", port, network: config.networkId })));
 
@@ -27,7 +29,7 @@ setInterval(async () => {
   if (running) return;
   running = true;
   try {
-    await tick({ config, chain, store, now });
+    await tick({ config, chain, store, now, receipts });
   } catch (e) {
     console.error(JSON.stringify({ level: "error", msg: "tick failed", error: String(e) }));
   } finally {

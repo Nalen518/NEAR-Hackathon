@@ -5,10 +5,11 @@ import { fromBase, toBase, type JobType } from "@shark/shared";
 import { baseDecode, PublicKey } from "near-api-js";
 import type { Chain, ContractJob, ContractWorker } from "./chain";
 import type { Config } from "./config";
+import { syncReceipts, type ReceiptSource } from "./events";
 import { canonicalJson, sha256, sha256Ref } from "./quote";
 import type { AuctionRow, BidRow, Store } from "./store";
 
-export type LoopDeps = { config: Config; chain: Chain; store: Store; now: () => number; fetchImpl?: typeof fetch; log?: (o: Record<string, unknown>) => void };
+export type LoopDeps = { config: Config; chain: Chain; store: Store; now: () => number; fetchImpl?: typeof fetch; receipts?: ReceiptSource; log?: (o: Record<string, unknown>) => void };
 
 const RFQ_TIMEOUT_MS = 20_000; // FR-31
 const LATE_GRACE_SECS = 60;
@@ -26,9 +27,14 @@ const orderId = (id: number) => `j_${String(id).padStart(6, "0")}`;
 const DAY = 86_400;
 const DAILY_AT_SECS = 5 * 60; // 00:05 UTC (ARCHITECTURE §7)
 const OWED_RETRY_SECS = 3_600;
+const RECEIPTS_EVERY_SECS = 60; // a keyless indexer allows a handful of requests a minute
 
 export async function tick(d: LoopDeps): Promise<void> {
   const log = d.log ?? ((o) => console.log(JSON.stringify(o)));
+  if (d.receipts && d.now() - Number(d.store.kv("receipts_at") ?? 0) >= RECEIPTS_EVERY_SECS) {
+    d.store.setKv("receipts_at", String(d.now()));
+    await syncReceipts(d.receipts, d.store).catch((e) => log({ level: "error", reader: "receipts", error: String(e).slice(0, 160) })); // the API works without it
+  }
   await keepers(d, log);
   const stats = await d.chain.stats();
   const jobs: ContractJob[] = [];

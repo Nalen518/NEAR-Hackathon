@@ -14,6 +14,7 @@ import { agentMessage } from "../src/agents";
 import { bidDigest, tick } from "../src/loop";
 import { openStore } from "../src/store";
 import type { Facilitator } from "../src/x402";
+import { classify, nearblocksSource, syncReceipts, type ReceiptSource, type StoredReceipt } from "../src/events";
 
 const USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
 const NOW = 1_793_500_000;
@@ -244,7 +245,7 @@ describe("A1 and B4: GET /v1/company", () => {
     expect(c.recentJobs.map((j) => [j.orderId, j.status, j.reserveDelta, j.refund])).toEqual([["j_000002", "refunded", null, "0.60"], ["j_000001", "finalized", "0.36", null]]);
     expect(c.config).toMatchObject({ workerCapBps: 5000, reserveFloor: "12.10", complaintWindowSecs: 86400, bands: { summary: { min: "0.20", max: "1.00" } } });
     expect(c.owners).toMatchObject({ dao: "sharkco.testnet", ownersWaiting: "0.195" });
-    expect(c.sample).toMatchObject({ strikes: false, reserve: false, workers: false, recentJobs: false, owners: true, payouts: true });
+    expect(c.sample).toMatchObject({ strikes: false, reserve: false, workers: false, recentJobs: false, owners: true, payouts: false });
   });
 });
 
@@ -987,5 +988,166 @@ describe("x402 (method 3, FR-12)", () => {
     const res = await retry(header);
     expect(res.status).toBe(502);
     expect((await parsed(ApiError, res)).error).toBe("upstream_unavailable");
+  });
+});
+
+describe("event reader", () => {
+  let rid = 0;
+  const rcpt = (o: Partial<StoredReceipt> & Pick<StoredReceipt, "method" | "tx">): StoredReceipt => ({ receipt_id: `R${++rid}`, ok: true, at: NOW, predecessor: "x.testnet", args: {}, job: null, quote: null, ...o });
+  const put = (...rs: StoredReceipt[]) => rs.forEach((r) => store.putReceipt(r));
+  const payMsg = (quoteId: string) => `pay:${Buffer.from(JSON.stringify({ quote: { quote_id: quoteId }, sig: "ed25519:x" })).toString("base64")}`;
+
+  describe("source", () => {
+    const entry = (over: Record<string, unknown>) => ({
+      id: "1", receipt_id: "R1", transaction_hash: "TX1", predecessor_account_id: USDC, receiver_account_id: "sharkco.testnet", block_timestamp: "1793500000123456789",
+      actions: [{ action: "FUNCTION_CALL", method: "ft_on_transfer", args: JSON.stringify({ sender_id: "demo-buyer.testnet", amount: "600000", msg: payMsg("q_A") }) }],
+      outcomes: { status: true }, ...over,
+    });
+    it("parses the indexer's receipts and keeps only calls to the contract", async () => {
+      const urls: string[] = [];
+      const body = { cursor: "c2", txns: [
+        entry({}),
+        entry({ receipt_id: "R2", transaction_hash: "TX2", actions: [{ action: "FUNCTION_CALL", method: "deliver", args: JSON.stringify({ job: 7, delivery_hash: "sha256:d" }) }], outcomes: { status: false } }),
+        entry({ receipt_id: "R3", receiver_account_id: "someone.testnet" }), // not ours
+        entry({ receipt_id: "R4", actions: [{ action: "TRANSFER" }] }), // not a call
+        entry({ receipt_id: "R5", actions: [{ action: "FUNCTION_CALL", method: "pause", args: "not json" }] }),
+      ] };
+      const src = nearblocksSource("https://indexer.example/", "sharkco.testnet", (async (u: string) => (urls.push(u), Response.json(body))) as unknown as typeof fetch);
+      const page = await src.page(null);
+      expect(urls[0]).toBe("https://indexer.example/v1/account/sharkco.testnet/receipts?order=desc&per_page=25");
+      expect(page.next).toBe("c2");
+      expect(page.receipts.map((r) => [r.receipt_id, r.tx, r.method, r.ok, r.at, r.job, r.quote])).toEqual([
+        ["R1", "TX1", "ft_on_transfer", true, 1_793_500_000, null, "q_A"],
+        ["R2", "TX2", "deliver", false, 1_793_500_000, 7, null],
+        ["R5", "TX1", "pause", true, 1_793_500_000, null, null],
+      ]);
+      await src.page("c2");
+      expect(urls[1]).toContain("&cursor=c2");
+    });
+    it("finds the job or quote a call belongs to", () => {
+      expect(classify("ft_on_transfer", { msg: "escrow:12" })).toEqual({ job: 12, quote: null });
+      expect(classify("ft_on_transfer", { msg: payMsg("q_B") })).toEqual({ job: null, quote: "q_B" });
+      expect(classify("ft_on_transfer", { msg: "reserve" })).toEqual({ job: null, quote: null });
+      expect(classify("mark_paid_x402", { quote: { quote_id: "q_C" } })).toEqual({ job: null, quote: "q_C" });
+      expect(classify("award", { job: 3 })).toEqual({ job: 3, quote: null });
+    });
+    it("sync stores new receipts, goes back a page only while everything is new, and never twice", async () => {
+      const pages: Record<string, { receipts: StoredReceipt[]; next: string | null }> = {
+        first: { receipts: [rcpt({ method: "award", tx: "A", receipt_id: "S1" }), rcpt({ method: "deliver", tx: "B", receipt_id: "S2" })], next: "p2" },
+        p2: { receipts: [rcpt({ method: "pause", tx: "C", receipt_id: "S3" }), rcpt({ method: "pause", tx: "C", receipt_id: "S2" })], next: "p3" },
+        p3: { receipts: [rcpt({ method: "pause", tx: "D", receipt_id: "S4" })], next: null },
+      };
+      const asked: (string | null)[] = [];
+      const source: ReceiptSource = { page: async (c) => (asked.push(c), pages[c ?? "first"]) };
+      expect(await syncReceipts(source, store)).toBe(3); // S1 S2 fresh; S3 fresh, S2 known: stop
+      expect(asked).toEqual([null, "p2"]);
+      asked.length = 0;
+      expect(await syncReceipts(source, store)).toBe(0);
+      expect(asked).toEqual([null]);
+    });
+  });
+
+  describe("derived data", () => {
+    async function finalizedJob() {
+      const q = await parsed(Quote402, await post("/v1/orders", order()));
+      const j = job(42, { quote_id: q.quoteId, state: "finalized" });
+      store.putBlob("sha256:d", "x");
+      put(
+        rcpt({ method: "ft_on_transfer", tx: "TxPay", at: NOW - 600, predecessor: USDC, quote: q.quoteId }),
+        rcpt({ method: "deliver", tx: "TxDeliver", at: NOW - 500, job: 42, predecessor: "crab-worker.testnet", args: { job: 42 } }),
+        rcpt({ method: "on_review", tx: "TxReview", at: NOW - 450, job: 42, predecessor: "owl-reviewer.testnet", args: { job: 42, result: { mode: "primary", pass: true, codes: ["PASS"] } } }),
+        rcpt({ method: "finalize", tx: "TxFinal", at: NOW - 100, job: 42, args: { job: 42 } }),
+      );
+      return { q, j };
+    }
+    it("links the payment, delivery and review, and shows each payout and the split with its tx", async () => {
+      const { q } = await finalizedJob();
+      const o = await parsed(Order, await get("/v1/orders/j_000042"));
+      expect(o.timeline.map((e) => [e.event, e.tx ?? null, e.amount ?? null, e.worker ?? null])).toEqual([
+        ["paid", "TxPay", null, null],
+        ["awarded", null, null, "crab"],
+        ["delivered_for_review", "TxDeliver", null, null],
+        ["review_pass", "TxReview", null, null],
+        ["worker_paid", "TxReview", "0.18", "crab"],
+        ["reviewer_paid", "TxReview", "0.05", null],
+        ["finalized", "TxFinal", null, null],
+      ]);
+      expect(o.proof).toMatchObject({ paymentTx: "TxPay", workerPayoutTx: "TxReview" });
+      expect(o.proof.contractTxs).toEqual(expect.arrayContaining(["TxPay", "TxDeliver", "TxReview", "TxFinal"]));
+      expect((await parsed(QuoteStatus, await get(`/v1/quotes/${q.quoteId}`))).paymentTx).toBe("TxPay");
+    });
+    it("a failed call is not a payout, and a first fail pays nobody while the second pays Owl only", async () => {
+      const q = await parsed(Quote402, await post("/v1/orders", order()));
+      job(42, { quote_id: q.quoteId, state: "failed", round: 2, codes: ["FAIL_LENGTH"] });
+      const owl = "owl-reviewer.testnet";
+      put(
+        rcpt({ method: "on_review", tx: "TxFail1", at: NOW - 460, job: 42, predecessor: owl, args: { job: 42, result: { mode: "primary", pass: false, codes: ["FAIL_LENGTH"] } } }),
+        rcpt({ method: "on_review", tx: "TxFail2", at: NOW - 450, job: 42, predecessor: owl, args: { job: 42, result: { mode: "primary", pass: false, codes: ["FAIL_LENGTH"] } } }),
+        rcpt({ method: "on_review", tx: "TxBad", at: NOW - 440, job: 42, predecessor: owl, ok: false, args: { job: 42, result: { mode: "primary", pass: true, codes: ["PASS"] } } }),
+      );
+      const o = await parsed(Order, await get("/v1/orders/j_000042"));
+      expect(o.timeline.filter((e) => e.event.endsWith("_paid")).map((e) => [e.event, e.tx])).toEqual([["reviewer_paid", "TxFail2"]]);
+    });
+    it("a refund and a second review are linked", async () => {
+      const q = await parsed(Quote402, await post("/v1/orders", order()));
+      job(42, { quote_id: q.quoteId, state: "refunded", codes: ["FAIL_LENGTH"], review_requested_at: NOW - 400, reviewed_at: NOW - 300 });
+      put(
+        rcpt({ method: "dispute", tx: "TxDispute", at: NOW - 400, job: 42 }),
+        rcpt({ method: "on_review", tx: "TxSecond", at: NOW - 300, job: 42, predecessor: "owl-reviewer.testnet", args: { job: 42, result: { mode: "secondary", pass: false, codes: ["FAIL_LENGTH"] } } }),
+        rcpt({ method: "pay_refund", tx: "TxRefund", at: NOW - 200, job: 42 }),
+      );
+      const o = await parsed(Order, await get("/v1/orders/j_000042"));
+      const by = Object.fromEntries(o.timeline.map((e) => [e.event, e]));
+      expect(by.dispute.tx).toBe("TxDispute");
+      expect(by.second_review_fail.tx).toBe("TxSecond");
+      expect([by.reviewer_paid.tx, by.reviewer_paid.amount]).toEqual(["TxSecond", "0.05"]);
+      expect([by.refunded.tx, by.refunded.amount]).toEqual(["TxRefund", "0.60"]);
+    });
+    it("a payment the contract received but turned into no job is RETURNED after 90 s", async () => {
+      const q = await parsed(Quote402, await post("/v1/orders", order()));
+      put(rcpt({ method: "ft_on_transfer", tx: "TxBad", at: NOW, predecessor: USDC, quote: q.quoteId }));
+      app = makeApp(fakeChain(), () => NOW + 89);
+      expect(await parsed(QuoteStatus, await get(`/v1/quotes/${q.quoteId}`))).toMatchObject({ status: "AWAITING_PAYMENT" });
+      app = makeApp(fakeChain(), () => NOW + 91);
+      expect(await parsed(QuoteStatus, await get(`/v1/quotes/${q.quoteId}`))).toMatchObject({ status: "RETURNED", paymentTx: "TxBad" });
+      const p = await parsed(Prices, await get("/v1/prices"));
+      expect(p.recentQuotes[0]).toMatchObject({ status: "returned", tx: "TxBad", returnReason: null });
+    });
+    it("the company page lists payouts from the calls that made them, newest first, with the held fee", async () => {
+      await finalizedJob();
+      job(43, { state: "unresolved", held: true, unresolved_since: NOW - 50, worker: "raven-worker.testnet", worker_fee: "240000" });
+      put(rcpt({ method: "mark_unresolved", tx: "TxHold", at: NOW - 50, job: 43 }), rcpt({ method: "pay_refund", tx: "TxRefund43", at: NOW - 40, job: 43 }));
+      const c = await parsed(Company, await get("/v1/company"));
+      expect(c.payouts.map((p) => [p.orderId, p.kind, p.to, p.amount, p.tx, p.held])).toEqual([
+        ["j_000043", "refund", "demo-buyer.testnet", "0.60", "TxRefund43", false],
+        ["j_000043", "held", "raven", "0.24", "TxHold", true],
+        ["j_000042", "referral", "ref-agent.testnet", "0.045", "TxFinal", false],
+        ["j_000042", "worker", "crab", "0.18", "TxReview", false],
+        ["j_000042", "reviewer", "owl", "0.05", "TxReview", false],
+      ]);
+      expect(c.sample.payouts).toBe(false);
+      expect(c.recentJobs.find((j) => j.orderId === "j_000042")?.workerPayoutTx).toBe("TxReview");
+    });
+    it("the reader is off when its url is off", async () => {
+      expect(loadConfig({ SHARK_NETWORK: "testnet", TESTNET_RPC_URL: "x", TESTNET_CONTRACT_ID: "c", TESTNET_USDC_ID: "u", SHARK_QUOTE_KEY: "k", TESTNET_EVENTS_URL: "off" }).eventsUrl).toBeNull();
+      expect(loadConfig({ SHARK_NETWORK: "mainnet", MAINNET_RPC_URL: "x", MAINNET_CONTRACT_ID: "c", MAINNET_USDC_ID: "u", SHARK_QUOTE_KEY: "k" }).eventsUrl).toBe("https://api.nearblocks.io");
+    });
+  });
+
+  describe("in the job loop", () => {
+    it("syncs once a minute, and a broken indexer does not stop the loop", async () => {
+      let calls = 0;
+      let broken = false;
+      const receipts: ReceiptSource = { page: async () => { calls++; if (broken) throw new Error("indexer down"); return { receipts: [], next: null }; } };
+      let now = NOW;
+      const deps = () => ({ ...loopDeps({}), now: () => now, receipts });
+      await tick(deps());
+      await tick(deps());
+      expect(calls).toBe(1);
+      now += 60;
+      broken = true;
+      await expect(tick(deps())).resolves.toBeUndefined();
+      expect(calls).toBe(2);
+    });
   });
 });

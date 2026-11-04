@@ -23,6 +23,8 @@ import type { Chain, ContractJob } from "./chain";
 import type { Config } from "./config";
 import { HttpError } from "./errors";
 import { fetchSnapshot, fileToSnapshot, MAX_BYTES, snapshotText, type Snapshot } from "./input";
+import { isReturned, type StoredReceipt } from "./events";
+import { payoutsOf, reviewsBefore } from "./ledger";
 import { canonicalJson, sha256Ref, signQuote, ulid, type SignedQuote } from "./quote";
 import type { QuoteRow, Store } from "./store";
 import { encode, paymentRequired, payWithX402, type Facilitator } from "./x402";
@@ -55,6 +57,10 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
     blob: store.blob,
     auction: store.auction,
     paymentTx: (quoteId) => store.kv(`paytx:${quoteId}`),
+    receipts: (job) => {
+      const pay = store.payReceiptForQuote(job.quote_id);
+      return [...(pay ? [pay] : []), ...store.receiptsForJob(job.id)].sort((a, b) => a.at - b.at);
+    },
     idOf: (account) => (account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : null),
   };
 
@@ -234,9 +240,11 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
     const row = store.quote(c.req.param("id"));
     if (!row) throw badField("quoteId", "There is no quote with that id.");
     const job = await chain.jobByQuote(row.id);
-    // shortcut: RETURNED needs the payment_returned event (an indexer); until then a returned payment shows AWAITING_PAYMENT, then EXPIRED
-    const status: QuoteStatus["status"] = job ? "PAID" : now() > row.expires_at ? "EXPIRED" : "AWAITING_PAYMENT";
-    return c.json({ quoteId: row.id, method: job?.method ?? "quote", status, orderId: job ? orderId(job.id) : null, paymentTx: store.kv(`paytx:${row.id}`), oneClickStatus: null } satisfies QuoteStatus);
+    // RETURNED: the contract received the payment but made no job, so the token gave it back (needs the event reader)
+    const pay = store.payReceiptForQuote(row.id);
+    const status: QuoteStatus["status"] = job ? "PAID" : isReturned(pay, false, now()) ? "RETURNED" : now() > row.expires_at ? "EXPIRED" : "AWAITING_PAYMENT";
+    const paymentTx = store.kv(`paytx:${row.id}`) ?? pay?.tx ?? null;
+    return c.json({ quoteId: row.id, method: job?.method ?? "quote", status, orderId: job ? orderId(job.id) : null, paymentTx, oneClickStatus: null } satisfies QuoteStatus);
   });
 
   async function loadJob(raw: string) {
@@ -298,7 +306,7 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
 }
 
 const PASSED: ContractJob["state"][] = ["delivered", "complaint_review", "finalized"];
-type ViewCtx = { networkId: Config["networkId"]; blob: Store["blob"]; auction: Store["auction"]; paymentTx: (quoteId: string) => string | null; idOf: (account: string | null) => "crab" | "raven" | null };
+type ViewCtx = { receipts: (job: ContractJob) => StoredReceipt[]; networkId: Config["networkId"]; blob: Store["blob"]; auction: Store["auction"]; paymentTx: (quoteId: string) => string | null; idOf: (account: string | null) => "crab" | "raven" | null };
 
 /** Contract job + Shark's quote record → the §1.5 shape. The public view never carries private fields (D-166). */
 function orderView(job: ContractJob, row: QuoteRow | undefined, view: "public", ctx: ViewCtx): OrderPublic;
@@ -309,20 +317,40 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
   const passed = job.codes.includes("PASS");
   const codes = job.codes.filter((x): x is (typeof REVIEW_CODES)[number] => (REVIEW_CODES as readonly string[]).includes(x));
 
-  const timeline: Order["timeline"] = [{ at: iso(job.paid_at), event: "paid" }];
-  // shortcut: only the latest award, delivery and review times are on chain; the full event history comes from NEP-297 events (B1)
+  const rx = ctx.receipts(job);
+  const lastTx = (method: string) => rx.filter((r) => r.ok && r.method === method).at(-1)?.tx ?? null;
+  const payTx = rx.find((r) => r.ok && r.method === "ft_on_transfer" && r.quote === job.quote_id)?.tx ?? ctx.paymentTx(job.quote_id);
+  const timeline: Order["timeline"] = [{ at: iso(job.paid_at), event: "paid", tx: payTx }];
+  // shortcut: the chain keeps only the latest award, delivery and review times, so earlier rounds are not listed
   const auction = ctx.auction(job.id);
   const worker = ctx.idOf(job.worker);
   if (job.awarded_at) timeline.push({ at: iso(job.awarded_at), event: "awarded", ...(worker ? { worker } : {}), tx: auction?.award_tx ?? null });
-  if (job.delivered_at) timeline.push({ at: iso(job.delivered_at), event: "delivered_for_review", round: job.round });
+  if (job.delivered_at) timeline.push({ at: iso(job.delivered_at), event: "delivered_for_review", round: job.round, tx: lastTx("deliver") });
   const secondary = isSecondary(job);
-  if (job.review_requested_at) timeline.push({ at: iso(job.review_requested_at), event: "dispute", ...(worker ? { worker } : {}) });
+  if (job.review_requested_at) timeline.push({ at: iso(job.review_requested_at), event: "dispute", ...(worker ? { worker } : {}), tx: lastTx("dispute") });
   if (job.reviewed_at) {
-    if (secondary) timeline.push({ at: iso(job.reviewed_at), event: passed ? "second_review_pass" : "second_review_fail", round: 2 });
-    else if (job.state === "revision") timeline.push({ at: iso(job.reviewed_at), event: "review_fail", round: 1 }, { at: iso(job.reviewed_at), event: "revision_requested", round: 2 });
-    else timeline.push({ at: iso(job.reviewed_at), event: passed ? "review_pass" : "review_fail", round: job.round });
+    const tx = lastTx("on_review");
+    if (secondary) timeline.push({ at: iso(job.reviewed_at), event: passed ? "second_review_pass" : "second_review_fail", round: 2, tx });
+    else if (job.state === "revision") timeline.push({ at: iso(job.reviewed_at), event: "review_fail", round: 1, tx }, { at: iso(job.reviewed_at), event: "revision_requested", round: 2, tx });
+    else timeline.push({ at: iso(job.reviewed_at), event: passed ? "review_pass" : "review_fail", round: job.round, tx });
   }
-  if (job.unresolved_since) timeline.push({ at: iso(job.unresolved_since), event: "unresolved" });
+  if (job.unresolved_since) timeline.push({ at: iso(job.unresolved_since), event: "unresolved", tx: lastTx("mark_unresolved") });
+  // payouts, refunds, the split and complaints, each linked to the call that made them (B1)
+  let workerPayoutTx: string | null = null;
+  for (const r of rx) {
+    if (!r.ok) continue;
+    for (const p of payoutsOf(job, r, reviewsBefore(rx, r))) {
+      const at = iso(r.at);
+      const amount = usdc(p.amount);
+      if (p.kind === "worker") {
+        workerPayoutTx = r.tx;
+        timeline.push({ at, event: "worker_paid", ...(worker ? { worker } : {}), amount, tx: r.tx });
+      } else if (p.kind === "reviewer") timeline.push({ at, event: "reviewer_paid", amount, tx: r.tx });
+      else if (p.kind === "refund") timeline.push({ at, event: "refunded", amount, tx: r.tx });
+    }
+    if (r.method === "finalize") timeline.push({ at: iso(r.at), event: "finalized", tx: r.tx });
+    if (r.method === "complain") timeline.push({ at: iso(r.at), event: "complaint", tx: r.tx });
+  }
   timeline.sort((a, b) => a.at.localeCompare(b.at)); // oldest first; equal times keep their order
 
   const workerFee = BigInt(job.worker_fee);
@@ -373,7 +401,12 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
         job.state === "complaint_review" ? ("complaint_review" as const) : job.complaint_hash ? (refunding ? ("upheld" as const) : ("rejected" as const)) : null,
     },
     refund: refunding ? { to: job.payer, amount: usdc(price), reason: refundReason, tx: null } : null,
-    proof: { paymentTx: ctx.paymentTx(job.quote_id), awardTx: auction?.award_tx ?? null, workerPayoutTx: null, contractTxs: [auction?.award_tx, auction?.escrow_tx].filter((t): t is string => !!t) },
+    proof: {
+      paymentTx: payTx,
+      awardTx: auction?.award_tx ?? null,
+      workerPayoutTx,
+      contractTxs: [...new Set([auction?.award_tx, auction?.escrow_tx, ...rx.filter((r) => r.ok).map((r) => r.tx)].filter((t): t is string => !!t))],
+    },
     sample: false,
   };
   if (view === "public")
