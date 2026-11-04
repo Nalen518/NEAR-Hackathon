@@ -24,3 +24,12 @@ describe("network binding (API §0.3 N1)", () => {
     await expect(c.company()).resolves.toBeTruthy();
   });
 });
+
+describe("base URL", () => {
+  it.each(["http://x", "http://x/", "http://x/v1", "http://x/v1/"])("%s calls http://x/v1/health", async (base) => {
+    const seen: string[] = [];
+    const f: typeof fetch = async (u) => (seen.push(String(u)), new Response(fixture("health.json"), { status: 200 }));
+    await createSharkClient(base, f).health();
+    expect(seen).toEqual(["http://x/v1/health"]);
+  });
+});

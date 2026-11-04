@@ -63,7 +63,8 @@ export type OrderResponse =
 
 /** `expectNetwork` (CAIP-2) rejects any response that states another network (API §0.3 N1). */
 export function createSharkClient(baseUrl: string, fetchImpl: typeof fetch = (...a) => fetch(...a), expectNetwork?: string) {
-  const base = baseUrl.replace(/\/$/, "");
+  // Paths below start with /v1, so a base that already ends in /v1 (API-CONTRACT §5.1 writes it that way) is trimmed.
+  const base = baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
 
   async function call<S extends z.ZodType>(path: string, schema: S, init?: RequestInit, ok = [200]): Promise<z.infer<S>> {
     const res = await fetchImpl(`${base}${path}`, init);
