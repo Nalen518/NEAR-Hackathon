@@ -36,7 +36,7 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 | B1 Timeline events with tx links | ✅ | `e224e9d` | Every step links its tx; adds worker_paid, reviewer_paid, refunded, finalized, complaint. Built from the indexer's receipts: untested against real testnet data |
 | B2 Per-check review results | ✅ | `cb15147` | Code checks with detail, model checks pass only, Owl's reasons |
 | B3 Exact rule strings | ✅ | `f523c10` | The web's list in `apps/web/lib/checklist.ts` is now the real one |
-| B4 Company core (P6) | 🟡 | `e224e9d` | Live: strikes, reserve, P&L, workers, reviewer, ledger (with worker payout txs), config, payouts (from the reader, owners' payouts not listed). Sample: DAO proposals (no DAO yet) |
+| B4 Company core (P6) | ✅ | `e224e9d` and the next commit | Live: strikes, reserve, P&L (owners paid is the last 7 days, from a new contract counter), workers, reviewer, ledger (with worker payout txs), config (with the change time and tx), payouts (from the reader, owners' payouts not listed), Raven's Base gas (needs `TESTNET_EVM_RPC_URL` and `TESTNET_RAVEN_EVM_ADDRESS`, a placeholder until the owner gives them). Sample by decision: DAO proposals (no DAO yet) |
 | B5 `money` on orders | ✅ | `f523c10` | Same split as the contract's `finalize` |
 | B6 `404 order_not_found` | ✅ | `ca2bf11` | Schema fixed too |
 
@@ -45,7 +45,7 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 | Item | Status | Where | Notes |
 | --- | --- | --- | --- |
 | C1 Recent quotes with status | ✅ | `e224e9d` | Last 20 quotes: paid, returned (with the payment tx) or expired. `returnReason` is always null: the indexer gives no return value |
-| C2 Auctions and incidents logs | 🟡 | `fd56a27` | Auctions log done. Incidents from job state (complaints, impossible briefs); disputes, late work and strikes need the event reader |
+| C2 Auctions and incidents logs | ✅ | `fd56a27` and the next commit | Auctions log. Incidents from the reader's receipts, backfilled from job state: complaints, impossible briefs, disputes, late work and re-auctions, strikes and the cage (a reset restarts the count), a suspended worker, failed payouts (owed ledger) and refunds stuck over 10 minutes. New shared kinds `strike`, `late`, `worker_suspended`, `payout_failed` |
 | C3 `details.fixes[]` on brief_infeasible | ✅ | `fd56a27` | `{label, params, price}`. The web now shows these with their prices (its own suggestions stay only as a fallback for an older Shark) |
 
 ## Schema bugs found and fixed
@@ -63,7 +63,7 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 | 3 | Contract: `pay_owners`, `fund_shark`, `wind_down`, late worker re-auction, storage deposit in `pay_refund`, an owed ledger for failed payouts; Shark keepers for all of them | ✅ `c4b6b93` |
 | 4 | x402: the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` flow with a facilitator client, contract `mark_paid_x402` and `return_x402` (balance checked in a callback) | ✅ `5a8ac61` |
 | 4b | Our own x402 facilitator service on `@x402/near` (`/verify`, `/settle`, `/supported`); closed without Shark's API key and limited to our USDC and contract | ✅ `e90fa9f` |
-| 5 | Event reader for B1 tx links, the payouts list and RETURNED quotes | ✅ `e224e9d` (incidents for late work and strikes still come from job state) |
+| 5 | Event reader for B1 tx links, the payouts list and RETURNED quotes | ✅ `e224e9d` |
 | 6 | `GET /v1/openapi.json` (FR-14) | ✅ `99cb32a` OpenAPI 3.1 from the shared schemas; a test checks it lists exactly the served routes |
 | 7 | Sandbox tests of the real wasm (full job path), with a test USDC contract | ✅ `fe5070b` (run by `contracts/run-sandbox.sh` in Docker) |
 | 8 | Rust port of the code checks, for Owl in the OutLayer TEE (NFR-02) | ✅ `a87a732` (`owl/checks`, 20 shared fixtures in `fixtures/checks`) |
@@ -88,6 +88,8 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 - A worker disputes only when its own delivery passes every code check.
 - The sandbox tests cover the paid job, the double fail with refund, and x402. Disputes, Unresolved, re-auction and wind-down are covered by unit tests only.
 - The rate limit is kept in memory on one host.
+- Owners paid (7 days) is today's counter minus a daily snapshot kept in Shark's own store, so it is only exact once Shark has run for a week (before that it shows everything paid). The time a failed payout or a stuck refund "happened" is when Shark first saw it. A suspended worker's time is the owners' `suspend` call, else its last review.
+- Raven's gas gauge assumes 65,000 gas per payout. `wind_down` pays the DAO as kind `wind_down` so the owners counter ignores it.
 - The event reader uses a public indexer (NearBlocks, no key) that lists calls but not logs, so payouts are derived from the call that triggers them and the owners' payouts have no amount. It asks once a minute and is untested against real data until the contract is deployed. The exact `cursor` paging was seen live; pages are walked newest first until one is already known.
 - If the facilitator times out in the middle of `/settle`, Shark answers 502 and does not reconcile: a payment that moved anyway shows up as an unmatched deposit to return by hand (needs the event reader).
 - The URL fetcher checks the address before connecting, so DNS rebinding isn't caught.

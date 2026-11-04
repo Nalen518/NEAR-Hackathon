@@ -33,6 +33,9 @@ export type Config = {
   /** Shark's USDC wallet for escrow and keepers (FR-34). shortcut: a testnet account key until the OutLayer wallet */
   walletId: string | null;
   walletKey: string | null;
+  /** Base Sepolia RPC and Raven's address on it; both null until the owner gives them */
+  evmRpcUrl: string | null;
+  ravenEvmAddress: string | null;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -69,5 +72,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     ),
     walletId: env[`${NET}_SHARK_WALLET_ID`] || null,
     walletKey: env.SHARK_WALLET_KEY || null,
+    evmRpcUrl: env[`${NET}_EVM_RPC_URL`] || null,
+    ravenEvmAddress: env[`${NET}_RAVEN_EVM_ADDRESS`] || null,
   };
 }

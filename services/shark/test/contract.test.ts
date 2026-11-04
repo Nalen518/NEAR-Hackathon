@@ -87,7 +87,7 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
     { id: "raven-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["140000", "80000", "180000"], jobs: 0, first_pass: 0, final_fails: 0, disputes_won: 0, disputes_lost: 0, disputes_unresolved: 0, unresolved_open: 0, late: 0, suspended: false },
   ],
   reviewer: async () => ({ id: "owl-reviewer.testnet", reviews: 5, overturned: 0, suspended: false }),
-  stats: async () => ({ jobs: jobs.size, strikes: 1, reserve: "16460000", owner_accrued: "195000", accounted: "0", open_jobs: 0, owed_open: 0 }),
+  stats: async () => ({ jobs: jobs.size, strikes: 1, reserve: "16460000", owner_accrued: "195000", accounted: "0", open_jobs: 0, owed_open: 0, owners_paid: "0", config_changed_at: null }),
   roles: async () => ({ owner: "sharkco.testnet", guardian: "guardian.sharkco.testnet", shark: "shark.sharkco.testnet", shark_wallet: "wallet.sharkco.testnet", usdc: USDC, network: "near:testnet" }),
   jobs: async (from, limit) => [...jobs.values()].filter((j) => j.id >= from).slice(0, limit),
   usdcBalance: async () => "3100000",
@@ -130,6 +130,7 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
     return "TxMark";
   },
   returnX402: async (s) => (txs.push(`return_x402 ${s.tx_hash}`), "TxReturn"),
+  ravenGas: async () => null,
   ...over,
 });
 
@@ -1175,5 +1176,87 @@ describe("FR-14: GET /v1/openapi.json", () => {
     expect(Object.keys(post.responses["200"].headers)).toEqual(["PAYMENT-RESPONSE"]);
     expect(doc.info.description).toContain("near:testnet");
     expect(doc.servers).toEqual([{ url: "http://localhost:8787" }]);
+  });
+});
+
+describe("C2/B4: incidents from receipts, owners paid, config change, Raven gas", () => {
+  let n = 0;
+  const rc = (method: string, at: number, over: Partial<StoredReceipt> = {}) => store.putReceipt({ receipt_id: `C${++n}`, tx: `Tx${n}`, method, ok: true, at, predecessor: "x.testnet", args: {}, job: null, quote: null, ...over });
+  const company = async () => parsed(Company, await get("/v1/company"));
+  const review = (at: number, jobId: number, result: Record<string, unknown>) => rc("on_review", at, { job: jobId, args: { job: jobId, result } });
+
+  it("logs late work, a re-auction, the strikes and the cage, with the time of each call", async () => {
+    job(1, { state: "awarded", worker: "raven-worker.testnet", excluded: "crab-worker.testnet", reauctioned: true });
+    job(2, { state: "refunded", worker: "crab-worker.testnet", codes: ["BRIEF_INVALID"] });
+    rc("expire_work", NOW - 900, { job: 1 });
+    review(NOW - 800, 2, { mode: "primary", pass: false, codes: ["BRIEF_INVALID"] });
+    review(NOW - 700, 3, { mode: "primary", pass: false, codes: ["BRIEF_INVALID"] });
+    review(NOW - 600, 4, { mode: "primary", pass: false, codes: ["COMPLAINT_UPHELD"] });
+    const c = await company();
+    expect(c.incidents.map((i) => [i.at, i.orderId, i.kind, i.strike])).toEqual([
+      [new Date((NOW - 600) * 1000).toISOString().replace(".000", ""), null, "strike", true],
+      [new Date((NOW - 600) * 1000).toISOString().replace(".000", ""), "j_000004", "complaint_upheld", true],
+      [new Date((NOW - 700) * 1000).toISOString().replace(".000", ""), "j_000003", "brief_invalid", true],
+      [new Date((NOW - 800) * 1000).toISOString().replace(".000", ""), "j_000002", "brief_invalid", true],
+      [new Date((NOW - 900) * 1000).toISOString().replace(".000", ""), "j_000001", "late", false],
+    ]);
+    expect(c.incidents.at(-1)?.text).toBe("Crab missed its deadline. The job went back to auction.");
+    expect(c.incidents[0].text).toBe("Shark is caged after 3 strikes. It takes no new orders until the owners reset them.");
+    for (const i of c.incidents) expect(i.text).not.toMatch(/[;—–]|\w-\w/);
+  });
+
+  it("restarts the strike count when the owners reset it", async () => {
+    rc("on_review", NOW - 500, { job: 5, args: { result: { mode: "primary", codes: ["BRIEF_INVALID"] } } });
+    rc("on_review", NOW - 400, { job: 6, args: { result: { mode: "primary", codes: ["BRIEF_INVALID"] } } });
+    rc("reset_strikes", NOW - 300);
+    rc("on_review", NOW - 200, { job: 7, args: { result: { mode: "primary", codes: ["BRIEF_INVALID"] } } });
+    expect((await company()).incidents.some((i) => i.kind === "strike")).toBe(false);
+  });
+
+  it("shows a suspended worker and the payouts that failed", async () => {
+    app = makeApp(
+      fakeChain({
+        workers: async () => [{ id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], jobs: 9, first_pass: 3, final_fails: 3, disputes_won: 0, disputes_lost: 2, disputes_unresolved: 0, unresolved_open: 0, late: 0, suspended: true }],
+        owed: async () => [{ id: 1, job: 5, to: "crab-worker.testnet", amount: "180000", kind: "worker" }],
+      }),
+    );
+    rc("suspend", NOW - 100, { args: { id: "crab-worker.testnet" } });
+    const c = await company();
+    expect(c.incidents.map((i) => [i.kind, i.orderId, i.text])).toEqual([
+      ["payout_failed", "j_000005", "A worker payout of 0.18 to crab failed. Shark retries it every hour."],
+      ["worker_suspended", null, "Crab was suspended after too many fails. Only the owners can bring it back."],
+    ]);
+    expect(c.incidents[1].at).toBe(new Date((NOW - 100) * 1000).toISOString().replace(".000", ""));
+    // the first sighting is remembered, so a later read shows the same time
+    app = makeApp(fakeChain({ owed: async () => [{ id: 1, job: 5, to: "crab-worker.testnet", amount: "180000", kind: "worker" }] }), () => NOW + 3000);
+    expect((await company()).incidents[0].at).toBe(new Date(NOW * 1000).toISOString().replace(".000", ""));
+  });
+
+  it("flags a refund that has been waiting too long, not a fresh one", async () => {
+    job(8, { state: "refund_due" });
+    expect((await company()).incidents).toEqual([]);
+    app = makeApp(fakeChain(), () => NOW + 601);
+    expect((await company()).incidents.map((i) => [i.orderId, i.kind])).toEqual([["j_000008", "payout_failed"]]);
+  });
+
+  it("owners paid: the last 7 days against a snapshot a week old, and the config change time and tx", async () => {
+    let paid = "300000";
+    const chain = () => fakeChain({ stats: async () => ({ jobs: jobs.size, strikes: 0, reserve: "0", owner_accrued: "0", accounted: "0", open_jobs: 0, owed_open: 0, owners_paid: paid, config_changed_at: NOW - 50 }) });
+    app = makeApp(chain(), () => NOW - 8 * 86_400);
+    expect((await company()).pnl7d.ownersPaid).toBe("0.30"); // first sight: nothing older, so all of it
+    paid = "500000";
+    app = makeApp(chain(), () => NOW);
+    expect((await company()).pnl7d.ownersPaid).toBe("0.20"); // 0.50 now less the 0.30 seen 8 days ago
+    rc("set_config", NOW - 50);
+    const c = await company();
+    expect([c.config.changedAt, c.config.changeTx]).toEqual([new Date((NOW - 50) * 1000).toISOString().replace(".000", ""), `Tx${n}`]);
+  });
+
+  it("Raven gas: the Base Sepolia balance and what it pays for, else a placeholder", async () => {
+    expect((await company()).reserve.ravenPayoutGas).toEqual({ balanceEth: "0", payoutsLeft: null, warnBelow: 5 });
+    app = makeApp(fakeChain({ ravenGas: async () => ({ balanceWei: "3250000000000000", gasPriceWei: "1000000000" }) })); // 0.00325 ETH at 1 gwei
+    expect((await company()).reserve.ravenPayoutGas).toEqual({ balanceEth: "0.003250000000000000", payoutsLeft: 50, warnBelow: 5 });
+    app = makeApp(fakeChain({ ravenGas: async () => { throw new Error("rpc down"); } }));
+    expect((await company()).reserve.ravenPayoutGas.payoutsLeft).toBeNull();
   });
 });

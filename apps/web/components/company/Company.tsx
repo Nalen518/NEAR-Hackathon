@@ -425,7 +425,7 @@ export function CompanyDashboard() {
           <div className="flex flex-col gap-3">
             <DataSource live={live("incidents")} />
             <p className="mono-label text-muted">
-              {"// "}complaints and disputes
+              {"// "}complaints, disputes and failures
             </p>
             {c.incidents.length ? (
               <ul className="flex flex-col gap-3">

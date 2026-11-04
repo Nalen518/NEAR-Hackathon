@@ -80,7 +80,7 @@ export type ContractWorker = {
   suspended: boolean;
 };
 export type ContractReviewer = { id: string; reviews: number; overturned: number; suspended: boolean };
-export type ContractStats = { jobs: number; strikes: number; reserve: string; owner_accrued: string; accounted: string; open_jobs: number; owed_open: number };
+export type ContractStats = { jobs: number; strikes: number; reserve: string; owner_accrued: string; accounted: string; open_jobs: number; owed_open: number; owners_paid: string; config_changed_at: number | null };
 export type ContractOwed = { id: number; job: number; to: string; amount: string; kind: string };
 export type ContractRoles = { owner: string; guardian: string; shark: string; shark_wallet: string; usdc: string; network: string };
 
@@ -130,6 +130,8 @@ export type Chain = {
   /** x402 (method 3): Shark reports a settled payment, or sends an unmatched one back. The contract checks its balance. */
   markPaidX402(quote: SignedQuote, sig: string, settlement: X402Settlement): Promise<string>;
   returnX402(settlement: X402Settlement): Promise<string>;
+  /** Raven's Base balance and gas price in wei, or null when no EVM RPC or address is configured (C2) */
+  ravenGas(): Promise<{ balanceWei: string; gasPriceWei: string } | null>;
 };
 
 export type X402Settlement = { tx_hash: string; payer: string; amount: string };
@@ -144,6 +146,9 @@ export type ChainOpts = {
   /** Shark's USDC wallet: escrow, and the permissionless keepers. shortcut: a plain testnet account until the OutLayer custody wallet (D-144) */
   walletId?: string;
   walletKey?: string;
+  /** Base Sepolia JSON-RPC and Raven's address there, for the payout gas gauge */
+  evmRpcUrl?: string;
+  ravenEvmAddress?: string;
 };
 
 const TGAS = 1_000_000_000_000n;
@@ -206,6 +211,16 @@ export function rpcChain(opts: ChainOpts): Chain {
     payOwners: () => call(wallet(), "pay_owners", {}, 100n * TGAS),
     retryOwed: (id) => call(wallet(), "retry_owed", { id }, 100n * TGAS),
     markPaidX402: (quote, sig, settlement) => call(shark(), "mark_paid_x402", { quote, sig, settlement }, 100n * TGAS),
+    ravenGas: async () => {
+      if (!opts.evmRpcUrl || !opts.ravenEvmAddress) return null;
+      const rpc = async (method: string, params: unknown[]) => {
+        const r = await fetch(opts.evmRpcUrl!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+        const j = (await r.json()) as { result?: string; error?: { message: string } };
+        if (!j.result) throw new Error(j.error?.message ?? "no result");
+        return BigInt(j.result).toString();
+      };
+      return { balanceWei: await rpc("eth_getBalance", [opts.ravenEvmAddress, "latest"]), gasPriceWei: await rpc("eth_gasPrice", []) };
+    },
     returnX402: (settlement) => call(shark(), "return_x402", { settlement }, 100n * TGAS),
   };
 }

@@ -2,6 +2,7 @@
 // a section whose data has no live source yet says so with `sample: true`, and the web labels it SAMPLE.
 import { fromBase, JobType, type AuctionRecord, type Company, type Incident, type LedgerJob, type Payout, type Prices, type Worker, type WorkerId } from "@shark/shared";
 import type { Chain, ContractJob } from "./chain";
+import { incidentsOf } from "./incidents";
 import type { Config } from "./config";
 import { isReturned } from "./events";
 import { payoutsOf, reviewsBefore } from "./ledger";
@@ -13,6 +14,31 @@ const DAY = 86_400;
 const QUOTE_TTL_SECS = 600;
 const SUSPEND_WINDOW_JOBS = 20; // SRD FR-47
 const UNRESOLVED_TIMEOUT_SECS = 7 * DAY; // SRD FR-46
+
+/** When Shark first saw something (kept in kv), for events the chain gives no time for. */
+function firstSeen(store: Store, key: string, now: number) {
+  const v = store.kv(key);
+  if (v) return Number(v);
+  store.setKv(key, String(now));
+  return now;
+}
+
+/** Owners' payouts in the last 7 days: today's total minus the total a week ago (a daily snapshot in kv), else all of it. */
+function ownersPaid7d(store: Store, total: bigint, now: number) {
+  const day = Math.floor(now / DAY);
+  const snaps: Record<string, string> = JSON.parse(store.kv("owners_paid_days") ?? "{}");
+  if (!(day in snaps)) {
+    snaps[day] = total.toString();
+    for (const d of Object.keys(snaps)) if (Number(d) < day - 30) delete snaps[d];
+    store.setKv("owners_paid_days", JSON.stringify(snaps));
+  }
+  const base = Object.keys(snaps).map(Number).filter((d) => d <= day - 7).sort((x, y) => y - x)[0];
+  return total - (base === undefined ? 0n : BigInt(snaps[base]));
+}
+
+/** wei as an ETH decimal string with all 18 places */
+const eth = (wei: bigint) => `${wei / 10n ** 18n}.${(wei % 10n ** 18n).toString().padStart(18, "0")}`;
+const PAYOUT_GAS = 65_000n; // an ERC-20 transfer, with room
 
 // a paid quote stays paid, so it is looked up once (C1)
 const paidQuotes = new Set<string>();
@@ -66,7 +92,7 @@ function split(j: ContractJob) {
 }
 
 export async function companyOf(config: Config, chain: Chain, store: Store, now: number): Promise<Company & { network: string }> {
-  const [state, cfg, stats, roles, workers, reviewer, prices] = await Promise.all([
+  const [state, cfg, stats, roles, workers, reviewer, prices, gas, owed] = await Promise.all([
     serviceStateOf(config, chain),
     chain.config(),
     chain.stats(),
@@ -74,6 +100,8 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
     chain.workers(),
     chain.reviewer(),
     pricesOf(chain, store, now),
+    chain.ravenGas().catch(() => null),
+    chain.owed(1, 100),
   ]);
   // shortcut: reads every job each call; fine for a hackathon's few hundred jobs, cache or index beyond that
   const jobs: ContractJob[] = [];
@@ -139,26 +167,19 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
     ];
   });
 
-  // shortcut: from job state only; late work and strike events join with the event reader
-  const incidents: Incident[] = jobs
-    .flatMap((j): Incident[] => {
-      const at = iso(j.reviewed_at ?? j.paid_at);
-      const orderId = `j_${String(j.id).padStart(6, "0")}`;
-      const out: Incident[] = [];
-      if (j.held || j.state === "unresolved") out.push({ at: iso(j.unresolved_since ?? j.paid_at), orderId, kind: "dispute", text: "A dispute got no second review in time. The customer was refunded and the worker fee is held.", strike: false });
-      else if (j.review_requested_at && (j.state === "delivered" || j.state === "complaint_review" || j.state === "finalized"))
-        out.push({ at, orderId, kind: "dispute_won", text: "Dispute won, the second review overturned the fail. The worker was paid.", strike: false });
-      else if (j.review_requested_at && (j.state === "refund_due" || j.state === "refunded")) out.push({ at, orderId, kind: "dispute", text: "Dispute lost, the second review confirmed the fail. The customer was refunded.", strike: false });
-      if (j.codes.includes("COMPLAINT_UPHELD")) out.push({ at, orderId, kind: "complaint_upheld", text: "Complaint upheld: the brief did not match the order. Refunded.", strike: true });
-      else if (j.codes.includes("COMPLAINT_REJECTED")) out.push({ at, orderId, kind: "complaint_rejected", text: "Complaint rejected: the brief matched the order.", strike: false });
-      else if (j.codes.includes("BRIEF_INVALID")) out.push({ at, orderId, kind: "brief_invalid", text: "The brief could not be met. Refunded.", strike: true });
-      return out;
-    })
-    .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, 20);
+  const nameOf = (account: string) => (account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : account === config.agents.owl ? "owl" : account);
+  const incidents = incidentsOf({
+    now,
+    threshold: cfg.strike_threshold,
+    jobs,
+    workers,
+    receipts: store.recentReceipts(["on_review", "reset_strikes", "expire_work", "mark_unresolved", "suspend"], 500).reverse(),
+    owed: owed.map((entry) => ({ entry, seenAt: firstSeen(store, `owed_seen:${entry.id}`, now) })),
+    refundSeen: new Map(jobs.filter((j) => j.state === "refund_due").map((j) => [j.id, firstSeen(store, `refund_seen:${j.id}`, now)])),
+    nameOf,
+  });
 
   // payouts from the calls that made them, newest first; fees held for an Unresolved job show as held
-  const nameOf = (account: string) => (account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : account === config.agents.owl ? "owl" : account);
   const madePayouts: Payout[] = store.recentReceipts(["on_review", "pay_refund", "release_unresolved", "finalize"], 60).flatMap((r) => {
     const j = r.job ? byId.get(r.job) : undefined;
     if (!j) return [];
@@ -225,8 +246,8 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
       floor: usdc(floor),
       sharkWallet: usdc(sharkWallet),
       dailyBudget: usdc(cfg.daily_budget),
-      // shortcut: Raven's Base payouts come with the Chain Signatures slice; null means "unknown until the first payout"
-      ravenPayoutGas: { balanceEth: "0", payoutsLeft: null, warnBelow: 5 },
+      // shortcut: placeholder (0 ETH, unknown) until the owner gives the Base Sepolia RPC URL and Raven's address
+      ravenPayoutGas: gas ? { balanceEth: eth(BigInt(gas.balanceWei)), payoutsLeft: BigInt(gas.gasPriceWei) > 0n ? Number(BigInt(gas.balanceWei) / (PAYOUT_GAS * BigInt(gas.gasPriceWei))) : null, warnBelow: 5 } : { balanceEth: "0", payoutsLeft: null, warnBelow: 5 },
     },
     pnl7d: {
       jobs: week.length,
@@ -235,8 +256,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
       reviews: usdc(sum("review")),
       referrals: usdc(sum("referral")),
       profit: usdc(sum("profit")),
-      // shortcut: pay_owners isn't in the contract yet, so nothing has been paid out to owners
-      ownersPaid: "0.00",
+      ownersPaid: usdc(ownersPaid7d(store, BigInt(stats.owners_paid), now)),
       ownersAccrued: usdc(stats.owner_accrued),
     },
     prices,
@@ -275,9 +295,9 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
       maxUnresolvedOpen: cfg.max_unresolved_open,
       complaintWindowSecs: cfg.complaint_window_secs,
       bands: Object.fromEntries(Object.entries(prices.types).map(([t, v]) => [t, v.band])) as Company["config"]["bands"],
-      changedAt: null,
+      changedAt: stats.config_changed_at ? iso(stats.config_changed_at) : null,
       changedByProposal: null,
-      changeTx: null,
+      changeTx: store.recentReceipts(["set_config"], 1)[0]?.tx ?? null,
     },
     payouts,
     auctions,

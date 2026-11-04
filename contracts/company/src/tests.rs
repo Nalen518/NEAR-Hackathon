@@ -959,3 +959,19 @@ fn only_shark_returns_x402() {
     ctx("stranger.testnet", 1_050);
     c.return_x402(settlement("tx9", "buyer.testnet", 600_000)).detach();
 }
+
+#[test]
+fn owners_paid_counts_only_transfers_that_succeeded_and_the_config_change_time_is_kept() {
+    let mut c = setup();
+    assert_eq!((c.get_stats().owners_paid.0, c.get_stats().config_changed_at), (0, None));
+    ctx("dao.testnet", 3_000);
+    c.set_config(config());
+    assert_eq!(c.get_stats().config_changed_at, Some(3_000));
+    ctx("sharkco.testnet", 3_001); // callbacks come from the contract itself
+    c.on_payout(0, acc("dao.testnet"), U128(195_000), "owner".into(), Err(PromiseError::Failed));
+    assert_eq!(c.get_stats().owners_paid.0, 0); // a failed payout is owed, not paid
+    c.on_payout(0, acc("dao.testnet"), U128(195_000), "owner".into(), Ok(()));
+    c.on_payout(0, acc("dao.testnet"), U128(1_000), "wind_down".into(), Ok(()));
+    c.on_payout(1, acc("crab.testnet"), U128(180_000), "worker".into(), Ok(()));
+    assert_eq!(c.get_stats().owners_paid.0, 195_000); // the wind-down sweep and worker pay don't count
+}

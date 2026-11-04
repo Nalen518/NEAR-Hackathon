@@ -194,6 +194,7 @@ async fn a_paid_job_is_delivered_finalized_and_everyone_is_paid() -> TestResult<
 
     n.call("wallet", "company", "pay_owners", json!({}), none).await?;
     assert_eq!(n.balance("dao").await?, 195_000);
+    assert_eq!(n.stats().await?["owners_paid"], "195000"); // counted when the transfer succeeded
     n.call("wallet", "company", "fund_shark", json!({}), none).await?; // daily budget 1.00, reserve is far above its floor
     assert_eq!(n.balance("wallet").await?, 5_000_000 - 230_000 + 1_000_000);
     n.assert_books().await

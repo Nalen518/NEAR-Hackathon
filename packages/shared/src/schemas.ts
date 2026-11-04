@@ -498,7 +498,7 @@ export type AuctionRecord = z.infer<typeof AuctionRecord>;
 export const Incident = z.object({
   at: IsoTime,
   orderId: OrderId.nullable(),
-  kind: z.enum(["complaint_upheld", "complaint_rejected", "dispute", "dispute_won", "late", "brief_invalid", "strike"]),
+  kind: z.enum(["complaint_upheld", "complaint_rejected", "dispute", "dispute_won", "late", "brief_invalid", "strike", "worker_suspended", "payout_failed"]),
   text: z.string(),
   strike: z.boolean(),
 });

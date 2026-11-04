@@ -255,6 +255,10 @@ pub struct Stats {
     pub accounted: U128,
     pub open_jobs: u64,
     pub owed_open: u64,
+    /// Everything `pay_owners` has paid out so far (counted when the transfer succeeds)
+    pub owners_paid: U128,
+    /// When `set_config` last ran (unix seconds)
+    pub config_changed_at: Option<u64>,
 }
 
 #[derive(BorshStorageKey)]
@@ -300,6 +304,8 @@ pub struct Contract {
     owed: LookupMap<u64, Owed>,
     owed_next: u64,
     owed_open: u64,
+    owners_paid: u128,
+    config_changed_at: Option<u64>,
     /// Quotes and settlement txs ("q:..." and "t:...") whose balance check is in flight
     x402_pending: LookupSet<String>,
     /// Settlement txs already turned into a job or returned (an x402 payment counts once)
@@ -356,6 +362,8 @@ impl Contract {
             owed: LookupMap::new(Key::Owed),
             owed_next: 1,
             owed_open: 0,
+            owners_paid: 0,
+            config_changed_at: None,
             x402_pending: LookupSet::new(Key::X402Pending),
             x402_used_tx: LookupSet::new(Key::X402UsedTx),
         };
@@ -369,6 +377,7 @@ impl Contract {
         self.only(&self.owner.clone());
         self.check_config(&config);
         self.config = config;
+        self.config_changed_at = Some(now_secs());
         emit("config_changed", json!({}));
     }
 
@@ -734,6 +743,9 @@ impl Contract {
     #[private]
     pub fn on_payout(&mut self, job: u64, to: AccountId, amount: U128, kind: String, #[callback_result] r: Result<(), PromiseError>) {
         if r.is_ok() {
+            if kind == "owner" {
+                self.owners_paid += amount.0;
+            }
             emit("payout", json!({ "job_id": job, "to": to, "amount": amount, "kind": kind, "chain": "near" }));
             return;
         }
@@ -859,7 +871,7 @@ impl Contract {
         emit("wound_down", json!({ "amount": U128(amount) }));
         if amount > 0 {
             let owner = self.owner.clone();
-            self.payout(&owner, amount, 0, "owner").detach();
+            self.payout(&owner, amount, 0, "wind_down").detach();
         }
     }
 
@@ -950,6 +962,8 @@ impl Contract {
             accounted: U128(self.accounted),
             open_jobs: self.open_jobs,
             owed_open: self.owed_open,
+            owners_paid: U128(self.owners_paid),
+            config_changed_at: self.config_changed_at,
         }
     }
 
