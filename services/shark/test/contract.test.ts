@@ -1151,3 +1151,27 @@ describe("event reader", () => {
     });
   });
 });
+
+describe("FR-14: GET /v1/openapi.json", () => {
+  it("documents exactly the customer routes the app serves, nothing missing and nothing extra", async () => {
+    const res = await get("/v1/openapi.json");
+    expect(res.status).toBe(200);
+    const doc = await res.json();
+    expect(doc.openapi).toBe("3.1.0");
+    const documented = Object.entries(doc.paths as Record<string, object>).flatMap(([p, ops]) => Object.keys(ops).map((m) => `${m.toUpperCase()} ${p.replace(/\{[^}]+\}/g, ":p")}`));
+    const internal = (p: string) => p.startsWith("/v1/files") || p.startsWith("/v1/agent") || p === "/v1/openapi.json";
+    const served = app.routes.filter((r) => r.method !== "ALL" && !internal(r.path)).map((r) => `${r.method} ${r.path.replace(/:[A-Za-z]+/g, ":p")}`);
+    expect([...new Set(documented)].sort()).toEqual([...new Set(served)].sort());
+  });
+  it("describes the 402 and x402 flow with schemas generated from the shared ones", async () => {
+    const doc = await (await get("/v1/openapi.json")).json();
+    const post = doc.paths["/v1/orders"].post;
+    expect(post.requestBody.content["application/json"].schema.required).toEqual(expect.arrayContaining(["jobType", "instructions", "payer"]));
+    expect(Object.keys(post.parameters.map((p: { name: string }) => p.name).reduce((a: object, n: string) => ({ ...a, [n]: 1 }), {}))).toEqual(["Idempotency-Key", "PAYMENT-SIGNATURE"]);
+    expect(Object.keys(post.responses["402"].headers)).toEqual(["WWW-Authenticate", "PAYMENT-REQUIRED"]);
+    expect(post.responses["402"].content["application/json"].schema.required).toEqual(expect.arrayContaining(["quoteId", "price", "brief", "quote", "sig", "pay"]));
+    expect(Object.keys(post.responses["200"].headers)).toEqual(["PAYMENT-RESPONSE"]);
+    expect(doc.info.description).toContain("near:testnet");
+    expect(doc.servers).toEqual([{ url: "http://localhost:8787" }]);
+  });
+});

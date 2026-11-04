@@ -7,6 +7,7 @@ import type { Chain } from "./chain";
 import { companyOf, pricesOf, serviceStateOf } from "./company";
 import type { Config } from "./config";
 import { HttpError, sendError } from "./errors";
+import { openApi } from "./openapi";
 import { orderRoutes } from "./orders";
 import { httpFacilitator, type Facilitator } from "./x402";
 import type { Store } from "./store";
@@ -52,6 +53,9 @@ export function createApp({ config, chain, store, now = () => Math.floor(Date.no
   );
 
   app.get("/v1/prices", async (c) => c.json({ network: config.networkId, ...(await pricesOf(chain, store, now())) }));
+
+  const openapi = openApi(config);
+  app.get("/v1/openapi.json", (c) => c.json(openapi));
 
   app.get("/v1/company", async (c) => c.json(await companyOf(config, chain, store, now())));
 
