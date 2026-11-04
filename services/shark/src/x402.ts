@@ -45,8 +45,8 @@ export type Facilitator = {
 
 /**
  * POST {url}/verify and {url}/settle with `{ x402Version, paymentPayload, paymentRequirements }` (x402 v2).
- * [VERIFY O-26] the exact key names were not shown verbatim in the docs we could read; check them against the
- * facilitator's /openapi.yaml before the first real payment.
+ * The key names are the ones in `@x402/core`'s SettleRequest and VerifyResponse types (checked against 2.29.0), which
+ * our own facilitator uses. FastNEAR's hosted one should match; confirm with its /openapi.yaml before relying on it.
  */
 export function httpFacilitator(url: string, apiKey?: string | null, fetchImpl: typeof fetch = (...a) => fetch(...a)): Facilitator {
   const post = async <T>(path: "/verify" | "/settle", payload: PaymentPayload, requirement: Requirement): Promise<T> => {

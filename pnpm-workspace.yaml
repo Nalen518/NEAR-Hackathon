@@ -7,3 +7,4 @@ allowBuilds:
   unrs-resolver: false
   msw: false
   esbuild: false
+  secp256k1: false
