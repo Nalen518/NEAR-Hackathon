@@ -45,6 +45,8 @@ export const SCENARIOS = {
   wrong_network: "The API host answers for the other network (API §0.3 N1)",
   thread_job: "A delivered X thread job (5 posts)",
   extract_job: "A delivered data extraction job (24 records)",
+  incident_kinds: "Company page with a strike, a suspension and a failed payout",
+  raven_gas_unset: "Raven has no Base address yet (gas 0, count unknown)",
 } as const;
 export type Scenario = keyof typeof SCENARIOS;
 
@@ -250,6 +252,14 @@ function companyFor(network: Network, scenario: Scenario): Company {
     c.owners = { dao: "sharkco.sputnik-dao.near", approvalRule: "1 of 1", openProposals: [], proposals: [{ id: 1, title: "register workers and reviewer, config", status: "passed", at: "2026-11-11T09:00:00Z", votes: "1 of 1" }], ownersWaiting: "1.18", trezuUrl: "https://trezu.example/dao/sharkco-mainnet" };
     c.guardian = { account: "guardian.sharkco.near", power: "pause only" };
   }
+  if (scenario === "incident_kinds")
+    c.incidents = [
+      { at: "2026-11-05T07:50:00Z", orderId: null, kind: "payout_failed", text: "Raven's payout on Base failed. Shark retries it and the fee stays held.", strike: false },
+      { at: "2026-11-05T07:30:00Z", orderId: null, kind: "worker_suspended", text: "Raven has 2 unresolved jobs open. It can't win auctions until they close.", strike: false },
+      { at: "2026-11-05T07:10:00Z", orderId: "j_000040", kind: "strike", text: "Brief invalid. Strike 1 for Shark.", strike: true },
+      ...c.incidents,
+    ];
+  if (scenario === "raven_gas_unset") c.reserve = { ...c.reserve, ravenPayoutGas: { balanceEth: "0", payoutsLeft: null, warnBelow: 5 } };
   if (scenario === "caged") c.strikes = { count: 3, threshold: 3 };
   if (scenario === "closed" || scenario === "paused" || scenario === "caged" || scenario === "no_worker" || scenario === "out_of_budget") c.state = scenario;
   return c;
@@ -368,27 +378,27 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
       if (method === "POST" && sub === "/view") {
         const auth = JSON.parse(String(init?.body ?? "{}")) as { message?: string; accountId?: string; nonce?: string };
         if (!auth.message?.startsWith(`sharkco:view:${id}:`)) return err(401, "payer_signature_invalid", "The signature doesn't match this job.");
+        // Shark accepts each NEP-413 nonce once (API-CONTRACT §1.5a), so the mock does too
+        if (chain.usedNonces.has(auth.nonce ?? "")) return err(401, "payer_signature_invalid", "The signature didn't check out (signature already used). Sign in again.");
+        chain.usedNonces.add(auth.nonce ?? "");
+        (globalThis as { __mockViewCalls?: number }).__mockViewCalls = ((globalThis as { __mockViewCalls?: number }).__mockViewCalls ?? 0) + 1; // read by e2e/job.spec.ts
         return json(o, 200, { "Cache-Control": "private, no-store" });
       }
       if (method === "POST" && sub === "/complaint") {
         if (!o.complaint.allowedUntil || o.complaint.status) return err(409, "complaint_closed", "The complaint window is closed for this job.");
+        const nonce = (JSON.parse(String(init?.body ?? "{}")) as { auth?: { nonce?: string } }).auth?.nonce ?? "";
+        if (chain.usedNonces.has(nonce)) return err(401, "payer_signature_invalid", "The signature didn't check out (signature already used). Sign in again.");
+        chain.usedNonces.add(nonce);
         chain.complained.add(id);
         return json({ status: "complaint_review" }, 202);
       }
     }
 
     switch (`${method} ${path}`) {
-        // Shark accepts each NEP-413 nonce once (API-CONTRACT §1.5a), so the mock does too
-        if (chain.usedNonces.has(auth.nonce ?? "")) return err(401, "payer_signature_invalid", "The signature didn't check out (signature already used). Sign in again.");
-        chain.usedNonces.add(auth.nonce ?? "");
-        (globalThis as { __mockViewCalls?: number }).__mockViewCalls = ((globalThis as { __mockViewCalls?: number }).__mockViewCalls ?? 0) + 1; // read by e2e/job.spec.ts
       case "GET /v1/prices":
         return json(prices);
       case "GET /v1/company":
         return json(companyFor(network, scenario));
-        const nonce = (JSON.parse(String(init?.body ?? "{}")) as { auth?: { nonce?: string } }).auth?.nonce ?? "";
-        if (chain.usedNonces.has(nonce)) return err(401, "payer_signature_invalid", "The signature didn't check out (signature already used). Sign in again.");
-        chain.usedNonces.add(nonce);
       case "GET /v1/health":
         return json({ ...health, network: `near:${network}`, contract: contractFor(network), state: companyFor(network, scenario).state });
       case "GET /v1/payment-options":

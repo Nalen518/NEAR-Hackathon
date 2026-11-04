@@ -52,3 +52,17 @@ test("API down keeps the page with sample data and a notice", async ({ page }) =
   await expect(page.getByText("Live numbers unavailable. Showing sample data.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Where the money went" })).toBeVisible();
 });
+
+test("the new incident kinds have names", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/company?mock=incident_kinds");
+  for (const t of ["company · payout failed", "company · worker suspended", "j_000040 · strike"]) await expect(page.getByText(t)).toBeVisible();
+});
+
+test("Raven gas with no Base address reads not connected, not empty", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/company?mock=raven_gas_unset");
+  await expect(page.getByText("not connected", { exact: true })).toBeVisible();
+  await expect(page.getByText(/0 Sepolia ETH/)).toHaveCount(0);
+  await expect(page.getByText(/payout gas not connected/)).toBeVisible();
+});

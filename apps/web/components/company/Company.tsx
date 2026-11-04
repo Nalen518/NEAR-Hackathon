@@ -92,6 +92,23 @@ function Pane({
   );
 }
 
+const INCIDENT_LABEL: Record<Company["incidents"][number]["kind"], string> = {
+  complaint_upheld: "complaint upheld",
+  complaint_rejected: "complaint rejected",
+  dispute: "dispute",
+  dispute_won: "dispute won",
+  late: "late",
+  brief_invalid: "brief invalid",
+  strike: "strike",
+  worker_suspended: "worker suspended",
+  payout_failed: "payout failed",
+};
+
+type RavenGas = Company["reserve"]["ravenPayoutGas"];
+/** Shark has no Base address or RPC for Raven yet: balance "0" and no count would read like an empty tank. */
+const gasUnset = (g: RavenGas) => g.payoutsLeft === null && Number(g.balanceEth) === 0;
+const gasLine = (g: RavenGas) => (gasUnset(g) ? "payout gas not connected" : `payout gas ${g.balanceEth} ETH, about ${g.payoutsLeft ?? "unknown"} payouts left`);
+
 function KV({ rows }: { rows: [string, ReactNode][] }) {
   return (
     <dl className="flex flex-col">
@@ -361,7 +378,7 @@ export function CompanyDashboard() {
                 note={
                   w.id === "crab"
                     ? "Fast and cheap. Wins most summaries."
-                    : `Paid in USDC on Base via Chain Signatures · payout gas ${c.reserve.ravenPayoutGas.balanceEth} ETH, about ${c.reserve.ravenPayoutGas.payoutsLeft ?? "unknown"} payouts left.`
+                    : `Paid in USDC on Base via Chain Signatures · ${gasLine(c.reserve.ravenPayoutGas)}.`
                 }
               />
             ))}
@@ -435,7 +452,7 @@ export function CompanyDashboard() {
                     className="flex flex-col gap-1 border-b border-line pb-3"
                   >
                     <span className="mono-data text-ink">
-                      {x.orderId ?? "company"} · {x.kind.replace(/_/g, " ")}
+                      {x.orderId ?? "company"} · {INCIDENT_LABEL[x.kind]}
                     </span>
                     <span className="mono-small text-muted">
                       {x.text}
@@ -716,13 +733,14 @@ function ReservePane({
       >
         <p className="mono-label text-muted">Raven payout gas</p>
         <p className="mono-data text-ink">
-          {gas.balanceEth} {network === "testnet" ? "Sepolia ETH" : "ETH"} ·{" "}
-          {gas.payoutsLeft === null
-            ? "unknown until the first payout"
-            : `enough for ≈ ${gas.payoutsLeft} payouts`}
+          {gasUnset(gas)
+            ? "not connected"
+            : `${gas.balanceEth} ${network === "testnet" ? "Sepolia ETH" : "ETH"} · ${gas.payoutsLeft === null ? "unknown until the first payout" : `enough for ≈ ${gas.payoutsLeft} payouts`}`}
         </p>
         <p className="mono-small text-muted">
-          {low
+          {gasUnset(gas)
+            ? `Shark has no ${NETWORKS[network].baseChain} address or RPC for Raven yet. The owner sets them.`
+            : low
             ? `Below ${gas.warnBelow} payouts: top it up before Raven’s payouts stop.`
             : `${NETWORKS[network].baseChain} address derived by Chain Signatures. Below ${gas.warnBelow} payouts this line becomes a warning: top it up before Raven’s payouts stop.`}
         </p>
