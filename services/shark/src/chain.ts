@@ -214,7 +214,7 @@ export function rpcChain(opts: ChainOpts): Chain {
     ravenGas: async () => {
       if (!opts.evmRpcUrl || !opts.ravenEvmAddress) return null;
       const rpc = async (method: string, params: unknown[]) => {
-        const r = await fetch(opts.evmRpcUrl!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+        const r = await fetch(opts.evmRpcUrl!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(4_000) });
         const j = (await r.json()) as { result?: string; error?: { message: string } };
         if (!j.result) throw new Error(j.error?.message ?? "no result");
         return BigInt(j.result).toString();

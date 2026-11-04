@@ -27,6 +27,8 @@ const orderId = (id: number) => `j_${String(id).padStart(6, "0")}`;
 const DAY = 86_400;
 const DAILY_AT_SECS = 5 * 60; // 00:05 UTC (ARCHITECTURE §7)
 const OWED_RETRY_SECS = 3_600;
+/** The contract refused the call (a panic or one of its E_ codes), as opposed to the network failing. */
+const CONTRACT_SAID_NO = /panicked|E_[A-Z_]+/;
 const RECEIPTS_EVERY_SECS = 60; // a keyless indexer allows a handful of requests a minute
 
 export async function tick(d: LoopDeps): Promise<void> {
@@ -54,9 +56,13 @@ async function keepers(d: LoopDeps, log: (o: Record<string, unknown>) => void) {
   const now = d.now();
   const day = Math.floor(now / DAY);
   if (now % DAY >= DAILY_AT_SECS && d.store.kv("daily") !== String(day)) {
-    d.store.setKv("daily", String(day));
+    let netError = false;
     for (const [keeper, run] of [["fund_shark", d.chain.fundShark], ["pay_owners", d.chain.payOwners]] as const)
-      await run().catch((e) => log({ level: "info", keeper, skipped: String(e).slice(0, 120) }));
+      await run().catch((e) => {
+        netError ||= !CONTRACT_SAID_NO.test(String(e)); // a timeout or an RPC error is tried again next tick
+        log({ level: "info", keeper, skipped: String(e).slice(0, 120) });
+      });
+    if (!netError) d.store.setKv("daily", String(day));
   }
   if (now - Number(d.store.kv("owed_at") ?? 0) >= OWED_RETRY_SECS) {
     d.store.setKv("owed_at", String(now));
@@ -69,10 +75,16 @@ async function step(d: LoopDeps, job: ContractJob) {
   const row = store.auction(job.id);
   const late = job.work_deadline > 0 && now() > job.work_deadline + LATE_GRACE_SECS;
   switch (job.state) {
-    case "paid":
+    case "paid": {
       if (!row || (job.reauctioned && !row.reauction)) return runAuction(d, job);
-      if (!row.winner) return; // no valid bid: the refund was already asked for
+      // The row is saved before the award (or the refund) goes out, so a call that failed is asked again here.
+      // The contract refuses a repeat once the job has moved on, which the tick logs and ignores.
+      if (!row.winner) return void (await chain.markRefundDue(job.id)); // no valid bid
+      const cfg = await chain.config();
+      if (now() >= job.paid_at + cfg.job_timeout_secs) return void (await chain.markRefundDue(job.id)); // never awarded: give the money back
+      if (!row.award_tx) await sendAward(d, job, row, row.winner);
       return; // award sent but not seen on chain yet
+    }
     case "awarded":
       if (late) return void (await chain.expireWork(job.id));
       if (row && !job.escrowed && !row.escrow_tx) {
@@ -178,8 +190,13 @@ async function runAuction(d: LoopDeps, job: ContractJob) {
     await chain.markRefundDue(job.id);
     return;
   }
-  row.award_tx = await chain.award(job.id, win.w.id, toBase(win.bid.price).toString(), row.bid_hash!, reasonHash);
-  store.putAuction(row);
+  await sendAward(d, job, row, win.w.id);
+}
+
+async function sendAward(d: LoopDeps, job: ContractJob, row: AuctionRow, winner: string) {
+  const bid = row.bids.find((b) => b.account === winner)!;
+  row.award_tx = await d.chain.award(job.id, winner, toBase(bid.price).toString(), row.bid_hash!, row.reason_hash);
+  d.store.putAuction(row);
 }
 
 async function validBid(d: LoopDeps, b: Bid, w: ContractWorker, type: JobType, jobId: string, cap: bigint): Promise<boolean> {

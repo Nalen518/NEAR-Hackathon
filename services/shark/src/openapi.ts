@@ -83,7 +83,7 @@ export function openApi(config: Config) {
       },
       "/v1/orders/{orderId}/view": {
         post: {
-          summary: "The payer's view, after a NEP-413 signature of `sharkco:view:<orderId>:<unix seconds>` (recipient: the contract, fresh 32 byte nonce, at most 5 minutes old)",
+          summary: "The payer's view, after a NEP-413 signature of `sharkco:view:<orderId>:<unix seconds>` (recipient: the contract, fresh 32 byte nonce, at most 5 minutes old). The same signature may be sent again for the same order until it is 5 minutes old. A complaint signature works once",
           parameters: [orderId],
           requestBody: { required: true, content: json(SignedMessage, "input") },
           responses: { "200": { description: "OK, never cached", headers: { "Cache-Control": { schema: { type: "string", const: "private, no-store" } } }, content: json(OrderPayer) }, "401": error("Missing, old, reused or wrong signature"), "403": error("Valid signature, but not the payer"), "404": error("No such order") },

@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiError, Company, ComplaintAccepted, Health, InfeasibleDetails, X402PaymentRequired, Order, OrderAccepted, OrderPayer, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult } from "@shark/shared";
 import { baseEncode, KeyPair, KeyPairSigner } from "near-api-js";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import { createApp } from "../src/app";
-import { verifyNep413, type Chain, type ContractConfig, type ContractJob, type Nep413 } from "../src/chain";
+import { rpcChain, verifyNep413, type Chain, type ContractConfig, type ContractJob, type Nep413 } from "../src/chain";
 import { loadConfig } from "../src/config";
 import { agentMessage } from "../src/agents";
 import { bidDigest, tick } from "../src/loop";
@@ -34,6 +34,7 @@ const config = loadConfig({
   TESTNET_X402_FACILITATOR_URL: "http://localhost:8787/x402",
   SHARK_QUOTE_KEY: quoteKey.toString(),
   RATE_LIMIT_PER_MIN: "1000",
+  CACHE_SECS: "0",
   TESTNET_CRAB_ID: "crab-worker.testnet",
   TESTNET_RAVEN_ID: "raven-worker.testnet",
   TESTNET_OWL_ID: "owl-reviewer.testnet",
@@ -444,7 +445,7 @@ describe("A7: POST /v1/orders/{id}/view is the payer view", () => {
     expect(o.instructions).toContain("NEAR Intents and fees");
     expect(o.delivery).toEqual({ format: "text/plain", content: "The delivered summary.", deliveryHash: "sha256:d" });
   });
-  it("401 for a wrong recipient, an old timestamp, a replayed nonce or someone else's key", async () => {
+  it("401 for a wrong recipient, an old timestamp, the wrong message or someone else's key", async () => {
     const bad = [
       await signed("view", "j_000042", { recipient: "other.testnet" }),
       await signed("view", "j_000042", { ts: NOW - 301 }),
@@ -456,9 +457,22 @@ describe("A7: POST /v1/orders/{id}/view is the payer view", () => {
       expect(res.status).toBe(401);
       expect((await parsed(ApiError, res)).error).toBe("payer_signature_invalid");
     }
-    const once = await signed("view", "j_000042");
-    expect((await post("/v1/orders/j_000042/view", once)).status).toBe(200);
-    expect((await post("/v1/orders/j_000042/view", once)).status).toBe(401);
+  });
+  it("the same view signature works again for the same account and order, so the page can refresh", async () => {
+    const auth = await signed("view", "j_000042");
+    for (let i = 0; i < 3; i++) expect((await post("/v1/orders/j_000042/view", auth)).status).toBe(200);
+    // the nonce belongs to the first use: another order with the same nonce is a replay
+    job(43, { ...jobs.get(42)!, id: 43 });
+    const other = await signed("view", "j_000043", { nonce: Buffer.from(auth.nonce, "base64") });
+    expect((await post("/v1/orders/j_000043/view", other)).status).toBe(401);
+  });
+  it("a complaint signature is one use only", async () => {
+    const auth = await signed("complain", "j_000042");
+    const body = { reason: "The summary left out the fees.", auth };
+    expect((await post("/v1/orders/j_000042/complaint", body)).status).toBe(202);
+    const again = await post("/v1/orders/j_000042/complaint", body);
+    expect(again.status).toBe(401);
+    expect((await parsed(ApiError, again)).error).toBe("payer_signature_invalid");
   });
   it("403 not_payer for another valid account", async () => {
     const res = await post("/v1/orders/j_000042/view", await signed("view", "j_000042", { key: strangerKey, account: "stranger.testnet" }));
@@ -1258,5 +1272,111 @@ describe("C2/B4: incidents from receipts, owners paid, config change, Raven gas"
     expect((await company()).reserve.ravenPayoutGas).toEqual({ balanceEth: "0.003250000000000000", payoutsLeft: 50, warnBelow: 5 });
     app = makeApp(fakeChain({ ravenGas: async () => { throw new Error("rpc down"); } }));
     expect((await company()).reserve.ravenPayoutGas.payoutsLeft).toBeNull();
+  });
+});
+
+describe("a failed call in the job loop is asked again (review 1 and 5)", () => {
+  it("sends the award again when the first one failed", async () => {
+    job(1, unawarded);
+    let fail = true;
+    const chain = fakeChain({ award: async (j, w, fee) => { if (fail) throw new Error("rpc down"); txs.push(`award ${j} ${w} ${fee}`); return "TxAward"; } });
+    await tick(loopDeps({ "http://crab.local": crab }, [], chain));
+    expect(txs).toEqual([]);
+    expect(store.auction(1)!.award_tx).toBeNull();
+    fail = false;
+    await tick(loopDeps({ "http://crab.local": crab }, [], chain));
+    expect(txs).toEqual(["award 1 crab-worker.testnet 180000"]);
+    expect(store.auction(1)!.award_tx).toBe("TxAward");
+    await tick(loopDeps({ "http://crab.local": crab }, [], chain)); // sent, not seen yet: nothing more
+    expect(txs).toHaveLength(1);
+  });
+  it("asks for the refund again when nobody bid and the first ask failed", async () => {
+    job(1, unawarded);
+    let fail = true;
+    const chain = fakeChain({ markRefundDue: async (j) => { if (fail) throw new Error("rpc down"); txs.push(`refund_due ${j}`); return "TxRefundDue"; } });
+    await tick(loopDeps({}, [], chain));
+    expect(txs).toEqual([]);
+    fail = false;
+    await tick(loopDeps({}, [], chain));
+    expect(txs).toEqual(["refund_due 1"]);
+  });
+  it("refunds a job that could not be awarded within the job timeout", async () => {
+    job(1, { ...unawarded, paid_at: NOW - 21_601 });
+    const chain = fakeChain({ award: async () => { throw new Error("key has no allowance left"); } });
+    await tick(loopDeps({ "http://crab.local": crab }, [], chain));
+    await tick(loopDeps({ "http://crab.local": crab }, [], chain));
+    expect(txs).toEqual(["refund_due 1"]);
+  });
+  it("tries the daily keepers again after a network error, not after the contract said no", async () => {
+    const day = 20_758 * 86_400;
+    const deps = (chain: Chain) => ({ ...loopDeps({}, [], chain), now: () => day + 301 });
+    const down = fakeChain({ fundShark: async () => { throw new Error("fetch failed"); } });
+    await tick(deps(down));
+    await tick(deps(down));
+    expect(keeperTxs).toEqual(["pay_owners", "pay_owners"]); // fund_shark is asked every tick while the network is down
+    await tick(deps(fakeChain()));
+    await tick(deps(fakeChain()));
+    expect(keeperTxs).toEqual(["pay_owners", "pay_owners", "fund_shark", "pay_owners"]); // then once, and the day is done
+  });
+});
+
+describe("public reads under load (review 2, 3 and 4)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("rate limit counts the last x-forwarded-for value, which a client cannot fake", async () => {
+    app = createApp({ config: { ...config, rateLimitPerMin: 3 }, chain: fakeChain(), store, now: () => NOW });
+    const hit = (xff: string) => app.request("/v1/health", { headers: { "x-forwarded-for": xff } });
+    for (const fake of ["1.1.1.1", "2.2.2.2", "3.3.3.3"]) expect((await hit(`${fake}, 9.9.9.9`)).status).toBe(200); // the proxy added 9.9.9.9
+    expect((await hit("4.4.4.4, 9.9.9.9")).status).toBe(429);
+    expect((await hit("4.4.4.4, 8.8.8.8")).status).toBe(200); // another client behind the same proxy
+  });
+
+  it("keeps health, prices and company for cacheSecs, shares one read, and does not keep a failure", async () => {
+    let reads = 0;
+    let now = NOW;
+    let broken = false;
+    const chain = fakeChain({ stats: async () => (reads++, { jobs: 0, strikes: 0, reserve: "1000000", owner_accrued: "0", accounted: "0", open_jobs: 0, owed_open: 0, owners_paid: "0", config_changed_at: null }), serviceState: async () => { if (broken) throw new Error("rpc down"); return "ok"; } });
+    app = createApp({ config: { ...config, cacheSecs: 10 }, chain, store, now: () => now });
+    await Promise.all([get("/v1/company"), get("/v1/company"), get("/v1/company")]);
+    expect(reads).toBe(1); // three at once is one read
+    now += 9;
+    await get("/v1/company");
+    expect(reads).toBe(1);
+    now += 1;
+    await get("/v1/company");
+    expect(reads).toBe(2);
+    broken = true;
+    now += 10;
+    expect((await get("/v1/health")).status).toBe(502);
+    broken = false;
+    expect((await get("/v1/health")).status).toBe(200); // the failure was not kept
+  });
+
+  it("Raven's Base balance read has a timeout and turns hex wei into decimal", async () => {
+    const seen: (AbortSignal | null | undefined)[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      seen.push(init.signal);
+      const { method } = JSON.parse(String(init.body));
+      return Response.json({ jsonrpc: "2.0", id: 1, result: method === "eth_getBalance" ? "0xb8a9a9ff3000" : "0x3b9aca00" });
+    });
+    const chain = rpcChain({ rpcUrl: "http://rpc.invalid", contractId: "sharkco.testnet", usdcId: USDC, evmRpcUrl: "http://base.invalid", ravenEvmAddress: "0x0000000000000000000000000000000000000001" });
+    expect(await chain.ravenGas()).toEqual({ balanceWei: "203038841057280", gasPriceWei: "1000000000" });
+    expect(seen.every((s) => s instanceof AbortSignal)).toBe(true);
+    expect(await rpcChain({ rpcUrl: "http://rpc.invalid", contractId: "x", usdcId: USDC }).ravenGas()).toBeNull();
+  });
+});
+
+describe("a suspended worker without a suspend call (review 6)", () => {
+  it("keeps the time Shark first saw it instead of the time of the request", async () => {
+    const suspended = fakeChain({
+      workers: async () => [{ id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], jobs: 9, first_pass: 3, final_fails: 3, disputes_won: 0, disputes_lost: 2, disputes_unresolved: 0, unresolved_open: 0, late: 0, suspended: true }],
+    });
+    const at = async (now: number) => {
+      app = makeApp(suspended, () => now);
+      return (await parsed(Company, await get("/v1/company"))).incidents.map((i) => [i.kind, i.at]);
+    };
+    const first = new Date(NOW * 1000).toISOString().replace(".000", "");
+    expect(await at(NOW)).toEqual([["worker_suspended", first]]);
+    expect(await at(NOW + 3_000)).toEqual([["worker_suspended", first]]);
   });
 });

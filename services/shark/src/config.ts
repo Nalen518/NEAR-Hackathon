@@ -25,6 +25,8 @@ export type Config = {
   sharkKey: string | null;
   fileStorePath: string;
   rateLimitPerMin: number;
+  /** How long /v1/health, /v1/prices and /v1/company are kept in memory (0 = never) */
+  cacheSecs: number;
   /** Agent accounts → the names the web shows (API §5.1 `<NET>_*_ID`). */
   agents: { crab: string | null; raven: string | null; owl: string | null };
   trezuUrl: string | null;
@@ -65,6 +67,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sharkKey: env.SHARK_FN_KEY || null,
     fileStorePath: env.FILE_STORE_PATH ?? "./data",
     rateLimitPerMin: Number(env.RATE_LIMIT_PER_MIN ?? 30),
+    cacheSecs: Number(env.CACHE_SECS ?? 10),
     agents: { crab: env[`${NET}_CRAB_ID`] || null, raven: env[`${NET}_RAVEN_ID`] || null, owl: env[`${NET}_OWL_ID`] || null },
     trezuUrl: env[`${NET}_TREZU_URL`] || null,
     workerUrls: Object.fromEntries(

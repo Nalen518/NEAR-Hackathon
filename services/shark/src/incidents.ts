@@ -17,6 +17,8 @@ export type IncidentInput = {
   owed: { entry: ContractOwed; seenAt: number }[];
   /** When Shark first saw a job waiting for its refund */
   refundSeen: Map<number, number>;
+  /** When Shark first saw each worker suspended, for when no `suspend` call shows */
+  suspendedSeen: Map<string, number>;
   nameOf: (account: string) => string;
 };
 
@@ -26,7 +28,7 @@ export const STUCK_REFUND_SECS = 600;
 const iso = (secs: number) => new Date(secs * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 const orderId = (n: number | null) => (n ? `j_${String(n).padStart(6, "0")}` : null);
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const KIND_COPY: Record<string, string> = { worker: "worker", reviewer: "reviewer", referral: "referral", owner: "owners", x402_return: "x402 return", shark_budget: "budget" };
+const KIND_COPY: Record<string, string> = { worker: "worker", reviewer: "reviewer", referral: "referral", owner: "owners", wind_down: "wind down", x402_return: "x402 return", shark_budget: "budget" };
 
 export function incidentsOf(i: IncidentInput): Incident[] {
   const out: Incident[] = [];
@@ -84,11 +86,10 @@ export function incidentsOf(i: IncidentInput): Incident[] {
     if (j.state === "refund_due" && seen !== undefined && i.now - seen > STUCK_REFUND_SECS) backfill({ at: iso(seen), kind: "payout_failed", text: "The refund has not gone through yet. Shark keeps trying.", strike: false });
   }
 
-  // A suspended worker: when the owners did it, else when its last fail happened
+  // A suspended worker: when the owners did it, else when Shark first saw it (an automatic suspension leaves no call to date it)
   for (const w of i.workers.filter((x) => x.suspended)) {
     const own = i.receipts.filter((r) => r.method === "suspend" && r.args.id === w.id).at(-1);
-    const fail = i.receipts.filter((r) => ["settle_failed", "on_review"].includes(r.method) && r.job && byId.get(r.job)?.worker === w.id).at(-1);
-    add({ at: iso((own ?? fail)?.at ?? i.now), orderId: null, kind: "worker_suspended", text: `${cap(i.nameOf(w.id))} was suspended after too many fails. Only the owners can bring it back.`, strike: false });
+    add({ at: iso(own?.at ?? i.suspendedSeen.get(w.id) ?? i.now), orderId: null, kind: "worker_suspended", text: `${cap(i.nameOf(w.id))} was suspended after too many fails. Only the owners can bring it back.`, strike: false });
   }
 
   // Payouts that failed and wait for a retry

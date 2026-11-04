@@ -100,7 +100,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
     chain.workers(),
     chain.reviewer(),
     pricesOf(chain, store, now),
-    chain.ravenGas().catch(() => null),
+    chain.ravenGas().catch((e) => (console.error(JSON.stringify({ level: "error", msg: "raven gas unreadable", error: String(e).slice(0, 120) })), null)),
     chain.owed(1, 100),
   ]);
   // shortcut: reads every job each call; fine for a hackathon's few hundred jobs, cache or index beyond that
@@ -176,6 +176,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
     receipts: store.recentReceipts(["on_review", "reset_strikes", "expire_work", "mark_unresolved", "suspend"], 500).reverse(),
     owed: owed.map((entry) => ({ entry, seenAt: firstSeen(store, `owed_seen:${entry.id}`, now) })),
     refundSeen: new Map(jobs.filter((j) => j.state === "refund_due").map((j) => [j.id, firstSeen(store, `refund_seen:${j.id}`, now)])),
+    suspendedSeen: new Map(workers.filter((w) => w.suspended).map((w) => [w.id, firstSeen(store, `suspended_seen:${w.id}`, now)])),
     nameOf,
   });
 

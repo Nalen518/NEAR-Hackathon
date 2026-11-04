@@ -49,7 +49,7 @@ export function openStore(dir: string) {
       payer text, job_type text, price text, reason text, instructions text, brief text, input text, response text);
     create index if not exists quotes_idem on quotes(idem);
     create table if not exists files (id text primary key, hash text, bytes int, pages int, words int);
-    create table if not exists nonces (nonce text primary key, at int);
+    create table if not exists payer_nonces (nonce text primary key, scope text, at int);
     create table if not exists complaints (payer text, at int);
     create table if not exists auctions (job_id int primary key, row text);
     create table if not exists kv (key text primary key, value text);
@@ -79,14 +79,11 @@ export function openStore(dir: string) {
         return null;
       }
     },
-    /** false when the nonce was used before (replay). */
-    useNonce: (nonce: string, at: number) => {
-      try {
-        db.prepare("insert into nonces values (?, ?)").run(nonce, at);
-        return true;
-      } catch {
-        return false;
-      }
+    /** Remembers a NEP-413 nonce with what it was used for. false for a replay: the nonce was used before, unless
+     * `reusable` and it is the same `scope` (account, order and kind), which the web needs to refresh the payer view. */
+    useNonce: (nonce: string, at: number, scope: string, reusable: boolean) => {
+      if (Number(db.prepare("insert or ignore into payer_nonces values (?, ?, ?)").run(nonce, scope, at).changes) > 0) return true;
+      return reusable && (db.prepare("select scope from payer_nonces where nonce = ?").get(nonce) as { scope: string }).scope === scope;
     },
     complaintsSince: (payer: string, since: number) =>
       (db.prepare("select count(*) as n from complaints where payer = ? and at >= ?").get(payer, since) as { n: number }).n,

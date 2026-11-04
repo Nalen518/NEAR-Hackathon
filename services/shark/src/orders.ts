@@ -269,7 +269,8 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
     if (auth.recipient !== config.contractId) throw fail("wrong recipient");
     if (Buffer.from(auth.nonce, "base64").length !== 32) throw fail("bad nonce");
     if (!(await chain.verifyNep413(auth))) throw fail("bad signature");
-    if (!store.useNonce(auth.nonce, now())) throw fail("signature already used");
+    // the payer view may be fetched again with the same signature while it is fresh (5 min, checked above); a complaint may not
+    if (!store.useNonce(auth.nonce, now(), `${kind}:${auth.accountId}:${orderId(job.id)}`, kind === "view")) throw fail("signature already used");
     if (auth.accountId !== job.payer) throw new HttpError(403, "not_payer", "Only the account that paid for this job can do this.");
   }
 
