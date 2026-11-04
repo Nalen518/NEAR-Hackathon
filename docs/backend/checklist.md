@@ -7,17 +7,17 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 
 **How "done" is checked:** every response is parsed with the web's schemas from `packages/shared` in `services/shark/test/contract.test.ts`, against a fake chain. Nothing has run on testnet yet.
 
-Last updated: 4 Nov 2026 (after `c4b6b93`)
+Last updated: 4 Nov 2026 (after `5a8ac61`)
 
 ## Resume here (next session)
-Start at "Next" item 4: x402 (the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` checks, contract `mark_paid_x402` and `return_x402`). Tests at the last commit: Shark 68, agents 22, checks 12, shared 25, web 47, contract 53. Nothing is deployed and nothing is pushed.
+Start at "Next" item 4b: our own x402 facilitator service (built on `@x402/near`, tested with a fake signer; running it for real needs a funded relayer account). Then item 5, the event reader. Tests at the last commit: Shark 79, agents 22, checks 12, shared 25, web 47, contract 68. Nothing is deployed and nothing is pushed.
 
 ## A. Must (the web goes live on these)
 
 | Item | Status | Where | Notes |
 | --- | --- | --- | --- |
 | A1 Serve `/v1/*` with `near:testnet` | ✅ | `b37e5fb` | Prices, Company, Health, PaymentOptions, QuoteStatus all parse |
-| A2 `POST /v1/orders` 402 with a signed quote | ✅ | `f523c10` | Canonical quote bytes pinned in the Rust and TS tests. No x402 header yet (see x402 below) |
+| A2 `POST /v1/orders` 402 with a signed quote | ✅ | `5a8ac61` | Canonical quote bytes pinned in the Rust and TS tests. Also carries the x402 v2 `PAYMENT-REQUIRED` header |
 | A3 `GET /v1/quotes/{id}` | 🟡 | `f523c10` | AWAITING_PAYMENT, PAID, EXPIRED work. RETURNED needs the event reader |
 | A4 `POST /v1/uploads` | ✅ | `f523c10` | PDF, HTML, TXT, MD. 413 and 422 |
 | A5 Errors per §0.1 | ✅ | `f523c10` | `charged`, `details.field`, `Retry-After` on 429, 502 and 503 |
@@ -48,6 +48,9 @@ Start at "Next" item 4: x402 (the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE`
 | C2 Auctions and incidents logs | 🟡 | `fd56a27` | Auctions log done. Incidents from job state (complaints, impossible briefs); disputes, late work and strikes need the event reader |
 | C3 `details.fixes[]` on brief_infeasible | ✅ | `fd56a27` | `{label, params, price}`. The web still offers its own fixes until it reads these |
 
+## Open schema bug (reported, not changed)
+- `X402PaymentRequired` in `packages/shared` still has the v1 shape (`resource` and `description` inside each `accepts[]` entry). The header Shark sends follows x402 v2 and API §1.2 (`resource` at the top). Only the web's "For agents" snippet uses that schema, so nothing breaks, but a decoded real header won't parse with it.
+
 ## Schema bugs found and fixed
 - `OrderRequest.params` stripped thread params. Fixed with strict params schemas (`ca2bf11`).
 - `ERROR_CODES` had no `order_not_found`. Added (`ca2bf11`).
@@ -59,7 +62,8 @@ Start at "Next" item 4: x402 (the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE`
 | 1 | C1 recent quotes, C3 fixes with prices, C2 auctions log, `out_of_budget` state | ✅ `fd56a27` |
 | 2 | Contract: disputes and Unresolved (FR-44 to FR-47), Shark loop and timeline for them, worker dispute decision, Owl second review | ✅ `110076b` |
 | 3 | Contract: `pay_owners`, `fund_shark`, `wind_down`, late worker re-auction, storage deposit in `pay_refund`, an owed ledger for failed payouts; Shark keepers for all of them | ✅ `c4b6b93` |
-| 4 | x402: the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` checks, contract `mark_paid_x402` and `return_x402` | ⬜ |
+| 4 | x402: the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` flow with a facilitator client, contract `mark_paid_x402` and `return_x402` (balance checked in a callback) | ✅ `5a8ac61` |
+| 4b | Our own x402 facilitator service on `@x402/near` (`/verify`, `/settle`, `/supported`), fake signer in tests | ⬜ |
 | 5 | Event reader (NEP-297 logs) for B1 tx links, the payouts list, RETURNED quotes and the incidents log | ⬜ |
 | 6 | `GET /v1/openapi.json` (FR-14) | ⬜ |
 | 7 | Sandbox tests of the real wasm in Docker (full job path) | ⬜ |
@@ -67,7 +71,8 @@ Start at "Next" item 4: x402 (the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE`
 
 ## Later: needs a wallet 🔒 or NEAR AI 🧠
 - 🔒 Testnet deploy: contract init (`new` now takes the Shark wallet account), fund the contract with a little NEAR, register workers and Owl, USDC storage registrations, reserve seed, agent keys, then A12.
-- 🔒 x402 settlement through our own facilitator (a funded relayer account).
+- 🔒 x402 settlement through our own facilitator (a funded relayer account) or FastNEAR's (needs an API key, requested by a GitHub issue, reviewed by hand).
+- x402: confirm the facilitator's `/verify` and `/settle` request keys against its `/openapi.yaml` (O-26) before the first real payment; the code uses `x402Version`, `paymentPayload`, `paymentRequirements`.
 - 🧠 Running Crab, Raven and Owl for real (built and tested with a fake model in `a37ad08`). Pick models (O-06).
 - 🧠 The safety filter on NEAR AI (a pattern list for now).
 - 🔒🧠 Owl in the OutLayer TEE with attestation (O-03, O-13). Raven paid on Base via Chain Signatures (FR-60). The owners' DAO (O-09). The OutLayer custody wallet for Shark (D-144).
@@ -83,4 +88,5 @@ Start at "Next" item 4: x402 (the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE`
 - Suspension counts final fails plus lost disputes over a worker's whole record, not the last 20 jobs.
 - A worker disputes only when its own delivery passes every code check.
 - The rate limit is kept in memory on one host.
+- If the facilitator times out in the middle of `/settle`, Shark answers 502 and does not reconcile: a payment that moved anyway shows up as an unmatched deposit to return by hand (needs the event reader).
 - The URL fetcher checks the address before connecting, so DNS rebinding isn't caught.
