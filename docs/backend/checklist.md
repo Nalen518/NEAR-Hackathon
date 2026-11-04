@@ -7,10 +7,10 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 
 **How "done" is checked:** every response is parsed with the web's schemas from `packages/shared` in `services/shark/test/contract.test.ts`, against a fake chain. Nothing has run on testnet yet.
 
-Last updated: 4 Nov 2026 (after `e90fa9f`)
+Last updated: 4 Nov 2026 (after `fe5070b`)
 
 ## Resume here (next session)
-Next on the list: 7 (sandbox tests of the real wasm in Docker, with a test USDC contract) and 8 (Rust port of the code checks). Tests at the last commit: Shark 91, facilitator 11, agents 22, checks 12, shared 25, web 47, contract 68. Nothing is deployed and nothing is pushed.
+Every item in the "no wallet or AI needed" list is done. What is left needs your yes for signing, or the NEAR AI key: see "Later" below. Tests at the last commit: Shark 91, facilitator 11, agents 22, checks 33 (TypeScript) and the same 20 shared fixtures in Rust, shared 25, web 47, contract 68 unit tests plus 3 sandbox tests on the real wasm. Nothing is deployed and nothing is pushed.
 
 ## A. Must (the web goes live on these)
 
@@ -66,8 +66,8 @@ Next on the list: 7 (sandbox tests of the real wasm in Docker, with a test USDC 
 | 4b | Our own x402 facilitator service on `@x402/near` (`/verify`, `/settle`, `/supported`); closed without Shark's API key and limited to our USDC and contract | ✅ `e90fa9f` |
 | 5 | Event reader for B1 tx links, the payouts list and RETURNED quotes | ✅ `e224e9d` (incidents for late work and strikes still come from job state) |
 | 6 | `GET /v1/openapi.json` (FR-14) | ✅ `99cb32a` OpenAPI 3.1 from the shared schemas; a test checks it lists exactly the served routes |
-| 7 | Sandbox tests of the real wasm in Docker (full job path) | ⬜ |
-| 8 | Rust port of the code checks, for Owl in the OutLayer TEE (NFR-02) | ⬜ |
+| 7 | Sandbox tests of the real wasm (full job path), with a test USDC contract | ✅ `fe5070b` (run by `contracts/run-sandbox.sh` in Docker) |
+| 8 | Rust port of the code checks, for Owl in the OutLayer TEE (NFR-02) | ✅ `a87a732` (`owl/checks`, 20 shared fixtures in `fixtures/checks`) |
 
 ## Later: needs a wallet 🔒 or NEAR AI 🧠
 - 🔒 Testnet deploy: contract init (`new` now takes the Shark wallet account), fund the contract with a little NEAR, register workers and Owl, USDC storage registrations, reserve seed, agent keys, then A12.
@@ -75,7 +75,7 @@ Next on the list: 7 (sandbox tests of the real wasm in Docker, with a test USDC 
 - x402 with FastNEAR's hosted facilitator instead of ours: confirm its `/openapi.yaml` uses the same keys as `@x402/core` (`x402Version`, `paymentPayload`, `paymentRequirements`). Ours is checked against the library's types.
 - 🧠 Running Crab, Raven and Owl for real (built and tested with a fake model in `a37ad08`). Pick models (O-06).
 - 🧠 The safety filter on NEAR AI (a pattern list for now).
-- 🔒🧠 Owl in the OutLayer TEE with attestation (O-03, O-13). Raven paid on Base via Chain Signatures (FR-60). The owners' DAO (O-09). The OutLayer custody wallet for Shark (D-144).
+- 🔒🧠 Owl in the OutLayer TEE with attestation (O-03, O-13): `owl/review-wasm` (wasm32-wasip2) on top of `owl/checks`, which is ready. Raven paid on Base via Chain Signatures (FR-60). The owners' DAO (O-09). The OutLayer custody wallet for Shark (D-144).
 - Hosting (Railway or Fly) and the deployed web origin for CORS.
 
 ## Shortcuts in the code (each marked `shortcut:` where it lives)
@@ -87,6 +87,7 @@ Next on the list: 7 (sandbox tests of the real wasm in Docker, with a test USDC 
 - The second review fee is capped at what the reserve holds.
 - Suspension counts final fails plus lost disputes over a worker's whole record, not the last 20 jobs.
 - A worker disputes only when its own delivery passes every code check.
+- The sandbox tests cover the paid job, the double fail with refund, and x402. Disputes, Unresolved, re-auction and wind-down are covered by unit tests only.
 - The rate limit is kept in memory on one host.
 - The event reader uses a public indexer (NearBlocks, no key) that lists calls but not logs, so payouts are derived from the call that triggers them and the owners' payouts have no amount. It asks once a minute and is untested against real data until the contract is deployed. The exact `cursor` paging was seen live; pages are walked newest first until one is already known.
 - If the facilitator times out in the middle of `/settle`, Shark answers 502 and does not reconcile: a payment that moved anyway shows up as an unmatched deposit to return by hand (needs the event reader).
