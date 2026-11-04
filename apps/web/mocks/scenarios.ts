@@ -257,7 +257,7 @@ function companyFor(network: Network, scenario: Scenario): Company {
 
 // ---- A tiny in-memory "chain" so the mock wallet and the mock API agree on what was paid.
 type QuoteRec = { quoteId: string; issued: number; expiresAt: number; paidAt?: number; orderId: string; payer: string; method: "quote" | "intents" };
-const chain = { quotes: new Map<string, QuoteRec>(), registered: new Set<string>(), complained: new Set<string>(), seq: 42 };
+const chain = { quotes: new Map<string, QuoteRec>(), registered: new Set<string>(), complained: new Set<string>(), usedNonces: new Set<string>(), seq: 42 };
 const nextQuoteId = () => `q_01JC8Z3R9X0V4G7K2M5N8P${(chain.seq++).toString(36).toUpperCase().padStart(4, "0")}`;
 
 /** Called by the mock wallet when it "signs" a transaction. Returns a fake tx hash. */
@@ -366,7 +366,7 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
       const o = q ? orderFor(id, network, scenario === DELIVERED ? "ok" : scenario, q.paidAt!, 1 + Math.floor((Date.now() - q.paidAt!) / 2500)) : orderFor(id, network, scenario, Date.parse("2026-11-05T08:13:02Z"));
       if (method === "GET" && !sub) return json(toPublic(o));
       if (method === "POST" && sub === "/view") {
-        const auth = JSON.parse(String(init?.body ?? "{}")) as { message?: string; accountId?: string };
+        const auth = JSON.parse(String(init?.body ?? "{}")) as { message?: string; accountId?: string; nonce?: string };
         if (!auth.message?.startsWith(`sharkco:view:${id}:`)) return err(401, "payer_signature_invalid", "The signature doesn't match this job.");
         return json(o, 200, { "Cache-Control": "private, no-store" });
       }
@@ -378,10 +378,17 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
     }
 
     switch (`${method} ${path}`) {
+        // Shark accepts each NEP-413 nonce once (API-CONTRACT §1.5a), so the mock does too
+        if (chain.usedNonces.has(auth.nonce ?? "")) return err(401, "payer_signature_invalid", "The signature didn't check out (signature already used). Sign in again.");
+        chain.usedNonces.add(auth.nonce ?? "");
+        (globalThis as { __mockViewCalls?: number }).__mockViewCalls = ((globalThis as { __mockViewCalls?: number }).__mockViewCalls ?? 0) + 1; // read by e2e/job.spec.ts
       case "GET /v1/prices":
         return json(prices);
       case "GET /v1/company":
         return json(companyFor(network, scenario));
+        const nonce = (JSON.parse(String(init?.body ?? "{}")) as { auth?: { nonce?: string } }).auth?.nonce ?? "";
+        if (chain.usedNonces.has(nonce)) return err(401, "payer_signature_invalid", "The signature didn't check out (signature already used). Sign in again.");
+        chain.usedNonces.add(nonce);
       case "GET /v1/health":
         return json({ ...health, network: `near:${network}`, contract: contractFor(network), state: companyFor(network, scenario).state });
       case "GET /v1/payment-options":

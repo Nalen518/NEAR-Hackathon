@@ -27,6 +27,21 @@ test("signing in as the payer opens the delivery and the complaint box", async (
   await page.screenshot({ path: "../../docs/web/screens/job-payer-1440.png", fullPage: true });
 });
 
+test("the payer view is fetched once per signature (Shark accepts a nonce once)", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "Sign in to view" }).click();
+  await expect(page.getByText("you paid for this")).toBeVisible();
+  // A refetch on focus or reconnect would reuse the nonce and come back 401 payer_signature_invalid
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForTimeout(6000); // longer than the old 5 s payer refetch
+  await expect(page.getByText("you paid for this")).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __mockViewCalls?: number }).__mockViewCalls)).toBe(1);
+});
+
 test("a complaint needs a signature and a reason", async ({ page }) => {
   await open(page);
   await page.getByRole("button", { name: "Sign in to view" }).click();

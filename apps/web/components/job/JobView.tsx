@@ -5,6 +5,7 @@ import { NetworkMismatchError, SharkApiError, type Order, type OrderPayer, type 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useCompany, useShark } from "@/lib/api";
+import { DELIVERED, mergePayerView } from "@/lib/payer-view";
 import { jobNo } from "@/lib/text";
 import { useNow } from "@/lib/time";
 import { timelineRows } from "@/lib/timeline";
@@ -100,7 +101,8 @@ export function JobView({ orderId }: { orderId: string }) {
     refetchInterval: (q) => (q.state.error ? 5000 : q.state.data ? (FINAL.has(q.state.data.status) ? false : q.state.data.status === "unresolved" ? 60_000 : 5000) : false),
   });
 
-  // Payer view: in memory only, never shared or persisted (D-166). Re-fetched with the same signature while it is fresh.
+  // Payer view: in memory only, never shared or persisted (D-166). Shark accepts each signature once (one time nonce),
+  // so it is fetched exactly once per signature and never refetched. Status keeps coming from the public view below.
   const [auth, setAuth] = useState<Awaited<ReturnType<typeof wallet.signMessage>> | null>(null);
   const [signError, setSignError] = useState<string | null>(null);
   const payer = useQuery({
@@ -108,7 +110,12 @@ export function JobView({ orderId }: { orderId: string }) {
     queryFn: () => client.orderAsPayer(orderId, auth!),
     enabled: !!auth,
     gcTime: 0,
-    refetchInterval: (q) => (q.state.data && !FINAL.has(q.state.data.status) ? 5000 : false),
+    retry: false,
+    placeholderData: (prev) => prev, // signing again keeps the payer view on screen while the new fetch runs
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
   const signIn = async () => {
     setSignError(null);
@@ -126,13 +133,10 @@ export function JobView({ orderId }: { orderId: string }) {
       const sig = await wallet.signMessage(`sharkco:complain:${orderId}:${Math.floor(Date.now() / 1000)}`);
       return client.complain(orderId, { reason, auth: sig });
     },
-    onSuccess: () => {
-      void payer.refetch();
-      void pub.refetch();
-    },
+    onSuccess: () => void pub.refetch(),
   });
 
-  const o: Order | undefined = payer.data ?? pub.data;
+  const o: Order | undefined = payer.data ? mergePayerView(payer.data, pub.data) : pub.data;
   const err = pub.error ?? payer.error;
 
   if (!o) {
@@ -282,7 +286,11 @@ export function JobView({ orderId }: { orderId: string }) {
               p.delivery ? (
                 <DeliveryView delivery={p.delivery} />
               ) : (
-                <p className="body-small text-muted">{["unresolved", "refunded", "refund_due"].includes(o.status) ? "The delivery is withheld because you were refunded." : "The delivery appears here when Owl passes it."}</p>
+                DELIVERED.has(o.status) ? (
+                  <DeliveryView delivery={null} payer="the account that paid" onSignIn={signIn} signing={wallet.busy || payer.isFetching} />
+                ) : (
+                  <p className="body-small text-muted">{["unresolved", "refunded", "refund_due"].includes(o.status) ? "The delivery is withheld because you were refunded." : "The delivery appears here when Owl passes it."}</p>
+                )
               )
             ) : (
               <>

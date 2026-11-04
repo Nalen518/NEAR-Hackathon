@@ -43,4 +43,15 @@ describe("every mock scenario speaks the API contract", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(ApiError.parse(await res.json()).charged).toBe(false);
   });
+
+  it("a NEP-413 nonce works once, like Shark's (payer view and complaint)", async () => {
+    const f = createMockFetch("testnet", "ok");
+    const auth = (kind: "view" | "complain", nonce: string) => ({ accountId: "demo-buyer.testnet", publicKey: "ed25519:SAMPLE", signature: "SAMPLE", message: `sharkco:${kind}:j_000042:1`, nonce, recipient: "c" });
+    const view = (nonce: string) => f("/v1/orders/j_000042/view", { method: "POST", body: JSON.stringify(auth("view", nonce)) });
+    expect((await view("n1")).status).toBe(200);
+    const again = await view("n1");
+    expect(again.status).toBe(401);
+    expect((await again.json()).error).toBe("payer_signature_invalid");
+    expect((await view("n2")).status).toBe(200);
+  });
 });
