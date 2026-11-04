@@ -16,14 +16,17 @@ const accountId = need(`${NET}_${ROLE}_ID`);
 const key = need(`${ROLE}_KEY`);
 const chain = rpcAgentChain({ rpcUrl: need(`${NET}_RPC_URL`), contractId: need(`${NET}_CONTRACT_ID`), accountId, key });
 const files = sharkFiles({ sharkUrl: need(`${NET}_API_URL`).replace(/\/v1\/?$/, ""), accountId, key });
-const model = nearAi({ baseUrl: env.NEARAI_BASE_URL ?? "https://cloud-api.near.ai/v1", apiKey: need("NEARAI_API_KEY"), model: need(`${ROLE}_MODEL`) });
+const baseUrl = env.NEARAI_BASE_URL ?? "https://cloud-api.near.ai/v1";
+const model = nearAi({ baseUrl, apiKey: need("NEARAI_API_KEY"), model: need(`${ROLE}_MODEL`) });
+// a second, different model for disputes (D-114); only Owl uses it
+const secondaryModel = role === "owl" ? nearAi({ baseUrl, apiKey: need("NEARAI_API_KEY"), model: need("OWL_MODEL_SECONDARY") }) : undefined;
 
 if (role === "owl") {
   let running = false;
   const pass = async () => {
     if (running) return;
     running = true;
-    await reviewOnce({ chain, files, model }).catch((e) => console.error(JSON.stringify({ agent: "owl", level: "error", error: String(e) })));
+    await reviewOnce({ chain, files, model, secondaryModel }).catch((e) => console.error(JSON.stringify({ agent: "owl", level: "error", error: String(e) })));
     running = false;
   };
   setInterval(pass, 15_000);

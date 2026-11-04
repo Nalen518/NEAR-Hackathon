@@ -17,11 +17,14 @@ export type ContractConfig = Record<JobType, { band_min: string; band_max: strin
   suspend_threshold: number;
   max_unresolved_open: number;
   work_deadline_secs: number;
+  review_deadline_secs: number;
+  dispute_window_secs: number;
+  unresolved_timeout_secs: number;
   complaint_window_secs: number;
   job_timeout_secs: number;
 };
 
-export type JobState = "paid" | "awarded" | "review" | "revision" | "delivered" | "complaint_review" | "finalized" | "refund_due" | "refunded";
+export type JobState = "paid" | "awarded" | "review" | "revision" | "failed" | "dispute_review" | "unresolved" | "delivered" | "complaint_review" | "finalized" | "refund_due" | "refunded";
 
 /** `get_job` (contracts/company `Job`). Times are unix seconds. */
 export type ContractJob = {
@@ -49,12 +52,29 @@ export type ContractJob = {
   complaint_hash: string | null;
   codes: string[];
   reasons_hash: string | null;
+  dispute_until: number | null;
+  review_requested_at: number | null;
+  unresolved_since: number | null;
+  held: boolean;
   review_fee: string;
   referral_bps: number;
   owner_bps: number;
 };
 
-export type ContractWorker = { id: string; types: JobType[]; min_fees: string[]; jobs: number; first_pass: number; final_fails: number; late: number; suspended: boolean };
+export type ContractWorker = {
+  id: string;
+  types: JobType[];
+  min_fees: string[];
+  jobs: number;
+  first_pass: number;
+  final_fails: number;
+  disputes_won: number;
+  disputes_lost: number;
+  disputes_unresolved: number;
+  unresolved_open: number;
+  late: number;
+  suspended: boolean;
+};
 export type ContractReviewer = { id: string; reviews: number; overturned: number; suspended: boolean };
 export type ContractStats = { jobs: number; strikes: number; reserve: string; owner_accrued: string; accounted: string };
 export type ContractRoles = { owner: string; guardian: string; shark: string; usdc: string; network: string };
@@ -90,6 +110,10 @@ export type Chain = {
   markRefundDue(job: number): Promise<string>;
   finalize(job: number): Promise<string>;
   payRefund(job: number): Promise<string>;
+  /** Permissionless keepers for the dispute path (FR-44 to FR-46). */
+  settleFailed(job: number): Promise<string>;
+  markUnresolved(job: number): Promise<string>;
+  releaseUnresolved(job: number): Promise<string>;
 };
 
 export type ChainOpts = {
@@ -155,6 +179,9 @@ export function rpcChain(opts: ChainOpts): Chain {
     markRefundDue: (job) => call(shark(), "mark_refund_due", { job }),
     finalize: (job) => call(wallet(), "finalize", { job }, 100n * TGAS),
     payRefund: (job) => call(wallet(), "pay_refund", { job }, 100n * TGAS),
+    settleFailed: (job) => call(wallet(), "settle_failed", { job }),
+    markUnresolved: (job) => call(wallet(), "mark_unresolved", { job }),
+    releaseUnresolved: (job) => call(wallet(), "release_unresolved", { job }, 100n * TGAS),
   };
 }
 

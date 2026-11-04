@@ -42,6 +42,11 @@ pub enum JobState {
     Awarded,
     Review,
     Revision,
+    /// Second review failed: the worker has `dispute_window_secs` to dispute (FR-44)
+    Failed,
+    DisputeReview,
+    /// Refunded now, worker fee held in escrow until a second review or the timeout (FR-46)
+    Unresolved,
     Delivered,
     ComplaintReview,
     Finalized,
@@ -72,6 +77,9 @@ pub struct Config {
     pub suspend_threshold: u8,
     pub max_unresolved_open: u8,
     pub work_deadline_secs: u64,
+    pub review_deadline_secs: u64,
+    pub dispute_window_secs: u64,
+    pub unresolved_timeout_secs: u64,
     pub complaint_window_secs: u64,
     pub job_timeout_secs: u64,
 }
@@ -96,6 +104,10 @@ pub struct Worker {
     pub jobs: u32,
     pub first_pass: u32,
     pub final_fails: u32,
+    pub disputes_won: u32,
+    pub disputes_lost: u32,
+    pub disputes_unresolved: u32,
+    pub unresolved_open: u8,
     pub late: u32,
     pub suspended: bool,
 }
@@ -167,6 +179,13 @@ pub struct Job {
     pub codes: Vec<String>,
     /// Owl's full reasons text, stored by Shark under this hash
     pub reasons_hash: Option<String>,
+    /// End of the dispute window after a second failed review
+    pub dispute_until: Option<u64>,
+    /// When the second review was requested (the dispute, FR-45)
+    pub review_requested_at: Option<u64>,
+    pub unresolved_since: Option<u64>,
+    /// The refund is paid but the worker fee stays in escrow (Unresolved)
+    pub held: bool,
     // snapshots (FR-73)
     pub review_fee: U128,
     pub referral_bps: u16,
@@ -304,6 +323,10 @@ impl Contract {
             jobs: prev.as_ref().map_or(0, |p| p.jobs),
             first_pass: prev.as_ref().map_or(0, |p| p.first_pass),
             final_fails: prev.as_ref().map_or(0, |p| p.final_fails),
+            disputes_won: prev.as_ref().map_or(0, |p| p.disputes_won),
+            disputes_lost: prev.as_ref().map_or(0, |p| p.disputes_lost),
+            disputes_unresolved: prev.as_ref().map_or(0, |p| p.disputes_unresolved),
+            unresolved_open: prev.as_ref().map_or(0, |p| p.unresolved_open),
             late: prev.as_ref().map_or(0, |p| p.late),
             suspended: prev.as_ref().is_some_and(|p| p.suspended),
         };
@@ -396,7 +419,7 @@ impl Contract {
         let mut j = self.job(job);
         require!(j.state == JobState::Paid, "E_BAD_STATE");
         let w = self.workers.get(&worker).unwrap_or_else(|| env::panic_str("E_UNKNOWN_AGENT"));
-        require!(!w.suspended, "E_NOT_ELIGIBLE");
+        require!(!w.suspended && w.unresolved_open < self.config.max_unresolved_open, "E_NOT_ELIGIBLE");
         let min = w.min_fee(j.job_type).unwrap_or_else(|| env::panic_str("E_NOT_ELIGIBLE"));
         require!(fee.0 >= min, "E_BELOW_MIN_FEE");
         require!(fee.0 * BPS <= j.price.0 * self.config.worker_cap_bps as u128, "E_OVER_CAP");
@@ -464,20 +487,39 @@ impl Contract {
                     j.state = JobState::Revision;
                     j.work_deadline = now_secs() + self.config.work_deadline_secs;
                 } else {
-                    // second fail: payer refunded, worker unpaid, its fee back to the reserve, Owl paid (FR-44)
-                    // shortcut: the dispute window (FR-44, FR-45) comes with the dispute slice; until then a second fail is final
-                    self.reserve += j.worker_fee.0;
+                    // second fail: Owl is paid now, the worker fee stays in escrow while it may dispute (FR-44)
                     self.payout(&rv.id, j.review_fee.0, job, "reviewer").detach();
-                    j.escrowed = false;
-                    let w = self.worker_mut(&worker);
-                    w.jobs += 1;
-                    w.final_fails += 1;
-                    let w = w.clone();
-                    if w.final_fails >= self.config.suspend_threshold as u32 && !w.suspended {
-                        self.worker_mut(&worker).suspended = true;
-                        emit("worker_suspended", json!({ "id": worker }));
+                    self.worker_mut(&worker).jobs += 1;
+                    j.state = JobState::Failed;
+                    j.dispute_until = Some(now_secs() + self.config.dispute_window_secs);
+                }
+            }
+            (JobState::DisputeReview | JobState::Unresolved, "secondary") => {
+                let was_unresolved = j.state == JobState::Unresolved;
+                self.pay_second_review(&rv.id, j.review_fee.0, job);
+                j.escrowed = false;
+                if result.pass {
+                    // the first verdict is overturned: the worker is paid from escrow (FR-45)
+                    self.payout(&worker, j.worker_fee.0, job, "worker").detach();
+                    self.worker_mut(&worker).disputes_won += 1;
+                    if let Some(r) = self.reviewer.as_mut() {
+                        r.overturned += 1;
                     }
-                    j.state = JobState::RefundDue;
+                    if was_unresolved {
+                        j.state = JobState::Refunded; // the payer was already refunded and keeps it
+                    } else {
+                        j.state = JobState::Delivered;
+                        j.complaint_until = Some(now_secs() + j.complaint_window_secs);
+                    }
+                } else {
+                    self.reserve += j.worker_fee.0;
+                    self.worker_mut(&worker).disputes_lost += 1;
+                    j.state = if was_unresolved { JobState::Refunded } else { JobState::RefundDue };
+                    self.suspend_if_needed(&worker);
+                }
+                if was_unresolved {
+                    let w = self.worker_mut(&worker);
+                    w.unresolved_open = w.unresolved_open.saturating_sub(1);
                 }
             }
             (JobState::ComplaintReview, "complaint") => {
@@ -505,6 +547,64 @@ impl Contract {
         j.complaint_hash = Some(reason_hash);
         self.jobs.insert(job, j);
         emit("complaint", json!({ "job_id": job }));
+    }
+
+    /// The awarded worker contests a final fail within the window; a second review (Owl, another model) decides (FR-45).
+    pub fn dispute(&mut self, job: u64) {
+        let mut j = self.job(job);
+        require!(j.worker.as_ref() == Some(&env::predecessor_account_id()), "E_UNAUTHORIZED");
+        require!(j.state == JobState::Failed, "E_BAD_STATE");
+        require!(j.dispute_until.is_some_and(|t| now_secs() <= t), "E_WINDOW_CLOSED");
+        j.state = JobState::DisputeReview;
+        j.review_requested_at = Some(now_secs());
+        self.jobs.insert(job, j);
+        emit("dispute", json!({ "job_id": job }));
+    }
+
+    /// Nobody disputed in time: the payer is refunded, the worker unpaid, its fee back to the reserve (FR-44). Anyone.
+    pub fn settle_failed(&mut self, job: u64) {
+        let mut j = self.job(job);
+        require!(j.state == JobState::Failed, "E_BAD_STATE");
+        require!(j.dispute_until.is_some_and(|t| now_secs() > t), "E_WINDOW_CLOSED");
+        let worker = j.worker.clone().unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
+        self.reserve += j.worker_fee.0;
+        j.escrowed = false;
+        self.worker_mut(&worker).final_fails += 1;
+        self.suspend_if_needed(&worker);
+        j.state = JobState::RefundDue;
+        self.jobs.insert(job, j);
+    }
+
+    /// The second review didn't come by `review_deadline`: refund the payer now and hold the worker fee (FR-46). Anyone.
+    pub fn mark_unresolved(&mut self, job: u64) {
+        let mut j = self.job(job);
+        require!(j.state == JobState::DisputeReview, "E_BAD_STATE");
+        let asked = j.review_requested_at.unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
+        require!(now_secs() > asked + self.config.review_deadline_secs, "E_TIMEOUT_NOT_REACHED");
+        let worker = j.worker.clone().unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
+        self.worker_mut(&worker).unresolved_open += 1;
+        j.held = true;
+        j.unresolved_since = Some(now_secs());
+        j.state = JobState::RefundDue; // `pay_refund` then moves it to Unresolved
+        self.jobs.insert(job, j);
+        emit("unresolved", json!({ "job_id": job, "worker": worker }));
+    }
+
+    /// Unresolved for the whole timeout: the worker gets its fee (FR-46). Anyone.
+    pub fn release_unresolved(&mut self, job: u64) {
+        let mut j = self.job(job);
+        require!(j.state == JobState::Unresolved, "E_BAD_STATE");
+        let since = j.unresolved_since.unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
+        require!(now_secs() >= since + self.config.unresolved_timeout_secs, "E_TIMEOUT_NOT_REACHED");
+        let worker = j.worker.clone().unwrap_or_else(|| env::panic_str("E_BAD_STATE"));
+        self.payout(&worker, j.worker_fee.0, job, "worker").detach();
+        let w = self.worker_mut(&worker);
+        w.disputes_unresolved += 1;
+        w.unresolved_open = w.unresolved_open.saturating_sub(1);
+        j.escrowed = false;
+        j.state = JobState::Refunded;
+        self.jobs.insert(job, j);
+        emit("unresolved_released", json!({ "job_id": job, "worker": worker }));
     }
 
     /// Delivered and the complaint window is over: split the price (SRD §8.6). Anyone may call.
@@ -548,7 +648,7 @@ impl Contract {
     pub fn pay_refund(&mut self, job: u64) -> Promise {
         let mut j = self.job(job);
         require!(j.state == JobState::RefundDue, "E_BAD_STATE");
-        j.state = JobState::Refunded;
+        j.state = if j.held { JobState::Unresolved } else { JobState::Refunded };
         let (to, amount) = (j.payer.clone(), j.price.0);
         self.jobs.insert(job, j);
         emit("refund", json!({ "job_id": job, "to": to, "amount": U128(amount), "reason": "refund_due" }));
@@ -747,6 +847,10 @@ impl Contract {
                 complaint_hash: None,
                 codes: vec![],
                 reasons_hash: None,
+                dispute_until: None,
+                review_requested_at: None,
+                unresolved_since: None,
+                held: false,
                 review_fee: self.config.review_fee,
                 referral_bps: self.config.referral_bps,
                 owner_bps: self.config.owner_bps,
@@ -763,6 +867,28 @@ impl Contract {
         // shortcut: only NEAR payouts; Raven's Base payout via Chain Signatures comes with that slice (FR-60)
         self.payout(worker, j.worker_fee.0, j.id, "worker").detach();
         self.payout(reviewer, j.review_fee.0, j.id, "reviewer").detach();
+    }
+
+    /// FR-47: final fails plus lost disputes at the threshold suspend the worker.
+    /// shortcut: counted over the worker's whole record, not the last 20 jobs; add the window with the event reader.
+    fn suspend_if_needed(&mut self, worker: &AccountId) {
+        let threshold = self.config.suspend_threshold as u32;
+        let w = self.worker_mut(worker);
+        if !w.suspended && w.final_fails + w.disputes_lost >= threshold {
+            w.suspended = true;
+            emit("worker_suspended", json!({ "id": worker }));
+        }
+    }
+
+    /// The second review's fee comes from the reserve (FR-45).
+    /// shortcut: capped at what the reserve holds, so an empty reserve means an unpaid second review.
+    fn pay_second_review(&mut self, reviewer: &AccountId, fee: u128, job: u64) {
+        let amount = fee.min(self.reserve);
+        if amount == 0 {
+            return;
+        }
+        self.reserve -= amount;
+        self.payout(reviewer, amount, job, "reviewer").detach();
     }
 
     fn strike(&mut self) {

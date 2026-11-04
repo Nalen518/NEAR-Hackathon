@@ -108,13 +108,10 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
   const auctions: AuctionRecord[] = store.auctions(20).flatMap((a) => {
     const j = byId.get(a.job_id);
     if (!j) return [];
-    const outcome: AuctionRecord["outcome"] = j.complaint_hash && (j.state === "refund_due" || j.state === "refunded")
-      ? "complaint"
-      : j.state === "refund_due" || j.state === "refunded"
-        ? "refunded"
-        : j.state === "delivered" || j.state === "complaint_review" || j.state === "finalized"
-          ? "delivered"
-          : "working";
+    const gone = j.state === "refund_due" || j.state === "refunded";
+    const done = j.state === "delivered" || j.state === "complaint_review" || j.state === "finalized";
+    const outcome: AuctionRecord["outcome"] =
+      j.complaint_hash && gone ? "complaint" : j.held || j.state === "unresolved" ? "unresolved" : j.review_requested_at && done ? "dispute_won" : gone ? "refunded" : done ? "delivered" : "working";
     return [
       {
         orderId: `j_${String(j.id).padStart(6, "0")}`,
@@ -132,15 +129,20 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
     ];
   });
 
-  // shortcut: from job state only; disputes, late work and strike events join with the event reader
+  // shortcut: from job state only; late work and strike events join with the event reader
   const incidents: Incident[] = jobs
     .flatMap((j): Incident[] => {
       const at = iso(j.reviewed_at ?? j.paid_at);
       const orderId = `j_${String(j.id).padStart(6, "0")}`;
-      if (j.codes.includes("COMPLAINT_UPHELD")) return [{ at, orderId, kind: "complaint_upheld", text: "Complaint upheld: the brief did not match the order. Refunded.", strike: true }];
-      if (j.codes.includes("COMPLAINT_REJECTED")) return [{ at, orderId, kind: "complaint_rejected", text: "Complaint rejected: the brief matched the order.", strike: false }];
-      if (j.codes.includes("BRIEF_INVALID")) return [{ at, orderId, kind: "brief_invalid", text: "The brief could not be met. Refunded.", strike: true }];
-      return [];
+      const out: Incident[] = [];
+      if (j.held || j.state === "unresolved") out.push({ at: iso(j.unresolved_since ?? j.paid_at), orderId, kind: "dispute", text: "A dispute got no second review in time. The customer was refunded and the worker fee is held.", strike: false });
+      else if (j.review_requested_at && (j.state === "delivered" || j.state === "complaint_review" || j.state === "finalized"))
+        out.push({ at, orderId, kind: "dispute_won", text: "Dispute won, the second review overturned the fail. The worker was paid.", strike: false });
+      else if (j.review_requested_at && (j.state === "refund_due" || j.state === "refunded")) out.push({ at, orderId, kind: "dispute", text: "Dispute lost, the second review confirmed the fail. The customer was refunded.", strike: false });
+      if (j.codes.includes("COMPLAINT_UPHELD")) out.push({ at, orderId, kind: "complaint_upheld", text: "Complaint upheld: the brief did not match the order. Refunded.", strike: true });
+      else if (j.codes.includes("COMPLAINT_REJECTED")) out.push({ at, orderId, kind: "complaint_rejected", text: "Complaint rejected: the brief matched the order.", strike: false });
+      else if (j.codes.includes("BRIEF_INVALID")) out.push({ at, orderId, kind: "brief_invalid", text: "The brief could not be met. Refunded.", strike: true });
+      return out;
     })
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 20);
@@ -160,15 +162,15 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
         firstPassPct: w.jobs ? Math.round((100 * w.first_pass) / w.jobs) : 0,
         finalFails: w.final_fails,
         // shortcut: disputes and Unresolved come with the dispute slice; until then they are zero
-        disputesWon: 0,
-        disputesLost: 0,
+        disputesWon: w.disputes_won,
+        disputesLost: w.disputes_lost,
         suspendThreshold: cfg.suspend_threshold,
-        unresolvedOpen: 0,
+        unresolvedOpen: w.unresolved_open,
         maxUnresolvedOpen: cfg.max_unresolved_open,
         late: w.late,
         suspended: w.suspended,
-        eligible: !w.suspended,
-        ineligibleReason: w.suspended ? "suspended" : null,
+        eligible: !w.suspended && w.unresolved_open < cfg.max_unresolved_open,
+        ineligibleReason: w.suspended ? "suspended" : w.unresolved_open >= cfg.max_unresolved_open ? "unresolved_cap" : null,
       },
     ];
   });

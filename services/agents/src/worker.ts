@@ -77,7 +77,38 @@ export function createWorkerApp(d: WorkerDeps) {
     return c.json({ accepted: true });
   });
 
+  /** API §2.3: after a final fail the worker may dispute on chain if it disagrees. */
+  app.post("/dispute-window", async (c) => {
+    const body = (await c.req.json()) as DisputeWindow;
+    const disputed = await decideDispute(d, body).catch((e) => {
+      log({ level: "error", jobId: body.jobId, error: String(e) });
+      return false;
+    });
+    return c.json({ accepted: true, disputed });
+  });
+
   return app;
+}
+
+type DisputeWindow = { jobId: string; codes: string[]; reasons: string; until: string };
+
+/**
+ * Disputes only when it can show the fail was a model verdict: its own delivery passes every code check. A
+ * failed code check is a plain fact, so the worker accepts it. Deterministic, no model call.
+ * Returns whether it disputed.
+ */
+export async function decideDispute(d: WorkerDeps, w: DisputeWindow): Promise<boolean> {
+  const id = jobNumber(w.jobId);
+  const job = await d.chain.job(id);
+  if (!job || job.worker !== d.accountId || job.state !== "failed" || !job.delivery_hash) return false;
+  if (Date.parse(w.until) <= (d.now ?? (() => Math.floor(Date.now() / 1000)))() * 1000) return false;
+  const [briefText, delivery] = await Promise.all([d.files.get(job.brief_hash), d.files.get(job.delivery_hash)]);
+  if (briefText === null || delivery === null) return false;
+  const brief = JSON.parse(briefText) as Brief;
+  const source = (await d.files.get(job.input_hash)) ?? "";
+  if (runCodeChecks(brief, source, delivery).codes.length) return false;
+  await d.chain.dispute(id);
+  return true;
 }
 
 /** Does the job and delivers it. Exported for tests; the HTTP handler runs it in the background. */

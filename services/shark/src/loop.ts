@@ -12,7 +12,7 @@ export type LoopDeps = { config: Config; chain: Chain; store: Store; now: () => 
 
 const RFQ_TIMEOUT_MS = 20_000; // FR-31
 const LATE_GRACE_SECS = 60;
-const OPEN = new Set<ContractJob["state"]>(["paid", "awarded", "review", "revision", "delivered", "complaint_review", "refund_due"]);
+const OPEN = new Set<ContractJob["state"]>(["paid", "awarded", "review", "revision", "failed", "dispute_review", "unresolved", "delivered", "complaint_review", "refund_due"]);
 
 type Bid = { workerId: string; jobId: string; price: string; etaSecs: number; expiry: string; pubKey: string; sig: string };
 
@@ -65,6 +65,22 @@ async function step(d: LoopDeps, job: ContractJob) {
     case "refund_due":
       await chain.payRefund(job.id);
       return;
+    case "failed":
+      // the worker may dispute until dispute_until (FR-44); after that nobody can, so settle
+      if (row && row.round_sent < 3) await notifyDispute(d, job, row);
+      if (job.dispute_until !== null && now() > job.dispute_until) await chain.settleFailed(job.id);
+      return;
+    case "dispute_review": {
+      // Owl hasn't answered by the review deadline: refund now, hold the fee (FR-46)
+      const cfg = await chain.config();
+      if (job.review_requested_at !== null && now() > job.review_requested_at + cfg.review_deadline_secs) await chain.markUnresolved(job.id);
+      return;
+    }
+    case "unresolved": {
+      const cfg = await chain.config();
+      if (job.unresolved_since !== null && now() >= job.unresolved_since + cfg.unresolved_timeout_secs) await chain.releaseUnresolved(job.id);
+      return;
+    }
     default:
       return; // review and complaint_review wait for Owl
   }
@@ -161,6 +177,19 @@ async function notify(d: LoopDeps, job: ContractJob, row: AuctionRow, round: 1 |
   const res = await (d.fetchImpl ?? fetch)(`${url}/award`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(RFQ_TIMEOUT_MS) });
   if (res.ok) {
     row.round_sent = round;
+    d.store.putAuction(row);
+  }
+}
+
+/** POST /dispute-window to the worker (API §2.3): the codes and reasons of the final fail, and until when it may dispute. */
+async function notifyDispute(d: LoopDeps, job: ContractJob, row: AuctionRow) {
+  const url = d.config.workerUrls[job.worker ?? ""];
+  if (!url || job.dispute_until === null) return;
+  const reasons = (job.reasons_hash && d.store.blob(job.reasons_hash)) || "";
+  const body = { jobId: orderId(job.id), codes: job.codes, reasons, until: new Date(job.dispute_until * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") };
+  const res = await (d.fetchImpl ?? fetch)(`${url}/dispute-window`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(RFQ_TIMEOUT_MS) });
+  if (res.ok) {
+    row.round_sent = 3;
     d.store.putAuction(row);
   }
 }

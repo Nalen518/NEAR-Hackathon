@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { Account, JsonRpcProvider, KeyPair, KeyPairSigner, type KeyPairString } from "near-api-js";
 
-export type JobState = "paid" | "awarded" | "review" | "revision" | "delivered" | "complaint_review" | "finalized" | "refund_due" | "refunded";
+export type JobState = "paid" | "awarded" | "review" | "revision" | "failed" | "dispute_review" | "unresolved" | "delivered" | "complaint_review" | "finalized" | "refund_due" | "refunded";
 export type Job = {
   id: number;
   job_type: "extract" | "summary" | "thread";
@@ -18,7 +18,7 @@ export type Job = {
   codes: string[];
 };
 export type Worker = { id: string; types: Job["job_type"][]; min_fees: string[]; suspended: boolean };
-export type ReviewResult = { mode: "primary" | "complaint"; pass: boolean; codes: string[]; reasons_hash: string };
+export type ReviewResult = { mode: "primary" | "secondary" | "complaint"; pass: boolean; codes: string[]; reasons_hash: string };
 
 export type AgentChain = {
   jobCount(): Promise<number>;
@@ -27,6 +27,8 @@ export type AgentChain = {
   workers(): Promise<Worker[]>;
   deliver(job: number, deliveryHash: string): Promise<void>;
   onReview(job: number, result: ReviewResult): Promise<void>;
+  /** The awarded worker contests a final fail (FR-45). */
+  dispute(job: number): Promise<void>;
 };
 
 export function rpcAgentChain(o: { rpcUrl: string; contractId: string; accountId: string; key: string }): AgentChain {
@@ -44,6 +46,7 @@ export function rpcAgentChain(o: { rpcUrl: string; contractId: string; accountId
     workers: () => view<Worker[]>("get_workers"),
     deliver: (job, deliveryHash) => call("deliver", { job, delivery_hash: deliveryHash }),
     onReview: (job, result) => call("on_review", { job, result }),
+    dispute: (job) => call("dispute", { job }),
   };
 }
 

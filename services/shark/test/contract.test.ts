@@ -53,6 +53,9 @@ const contractConfig: ContractConfig = {
   suspend_threshold: 3,
   max_unresolved_open: 2,
   work_deadline_secs: 600,
+  review_deadline_secs: 600,
+  dispute_window_secs: 3600,
+  unresolved_timeout_secs: 604800,
   complaint_window_secs: 86400,
   job_timeout_secs: 21600,
 };
@@ -75,8 +78,8 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   config: async () => contractConfig,
   priceFloor: async (t) => floors[t],
   workers: async () => [
-    { id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], jobs: 4, first_pass: 3, final_fails: 1, late: 0, suspended: false },
-    { id: "raven-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["140000", "80000", "180000"], jobs: 0, first_pass: 0, final_fails: 0, late: 0, suspended: false },
+    { id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], jobs: 4, first_pass: 3, final_fails: 1, disputes_won: 1, disputes_lost: 0, disputes_unresolved: 0, unresolved_open: 0, late: 0, suspended: false },
+    { id: "raven-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["140000", "80000", "180000"], jobs: 0, first_pass: 0, final_fails: 0, disputes_won: 0, disputes_lost: 0, disputes_unresolved: 0, unresolved_open: 0, late: 0, suspended: false },
   ],
   reviewer: async () => ({ id: "owl-reviewer.testnet", reviews: 5, overturned: 0, suspended: false }),
   stats: async () => ({ jobs: jobs.size, strikes: 1, reserve: "16460000", owner_accrued: "195000", accounted: "0" }),
@@ -103,6 +106,9 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   markRefundDue: async (job) => (txs.push(`refund_due ${job}`), "TxRefundDue"),
   finalize: async (job) => (txs.push(`finalize ${job}`), "TxFinalize"),
   payRefund: async (job) => (txs.push(`pay_refund ${job}`), "TxPayRefund"),
+  settleFailed: async (job) => (txs.push(`settle_failed ${job}`), "TxSettle"),
+  markUnresolved: async (job) => (txs.push(`mark_unresolved ${job}`), "TxUnresolved"),
+  releaseUnresolved: async (job) => (txs.push(`release_unresolved ${job}`), "TxRelease"),
   ...over,
 });
 
@@ -166,6 +172,10 @@ function job(id: number, over: Partial<ContractJob> = {}): ContractJob {
     complaint_hash: null,
     codes: ["PASS"],
     reasons_hash: null,
+    dispute_until: null,
+    review_requested_at: null,
+    unresolved_since: null,
+    held: false,
     review_fee: "50000",
     referral_bps: 750,
     owner_bps: 6000,
@@ -699,5 +709,70 @@ describe("out_of_budget (FR-64)", () => {
   it("/health says no_worker when every worker is suspended", async () => {
     app = makeApp(fakeChain({ workers: async () => [] }));
     expect((await parsed(Health, await get("/v1/health"))).state).toBe("no_worker");
+  });
+});
+
+describe("disputes in the job loop (FR-44 to FR-46)", () => {
+  const withAuction = (jobId: number) => store.putAuction({ job_id: jobId, cap: "300000", bids: [{ account: "crab-worker.testnet", price: "0.18", etaSecs: 70, state: "winner" }], winner: "crab-worker.testnet", reason: "Crab wins at 0.18.", reason_hash: "sha256:r", bid_hash: "sha256:b", award_tx: "TxA", escrow_tx: "TxE", round_sent: 2, at: NOW - 900 });
+  it("tells the worker about the dispute window once, then settles after it", async () => {
+    store.putBlob("sha256:rr", "The post was too long.");
+    withAuction(1);
+    job(1, { state: "failed", codes: ["FAIL_LENGTH"], reasons_hash: "sha256:rr", escrowed: true, dispute_until: NOW + 100 });
+    const calls: { url: string; body: unknown }[] = [];
+    await tick(loopDeps({ "http://crab.local": crab }, calls));
+    await tick(loopDeps({ "http://crab.local": crab }, calls));
+    expect(calls.map((c) => [c.url, c.body])).toEqual([["http://crab.local/dispute-window", { jobId: "j_000001", codes: ["FAIL_LENGTH"], reasons: "The post was too long.", until: new Date((NOW + 100) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") }]]);
+    expect(txs).toEqual([]);
+    job(1, { ...jobs.get(1)!, dispute_until: NOW - 1 });
+    await tick(loopDeps({ "http://crab.local": crab }, calls));
+    expect(txs).toEqual(["settle_failed 1"]);
+  });
+  it("a dispute with no second review by the deadline goes Unresolved, not before", async () => {
+    job(1, { state: "dispute_review", review_requested_at: NOW - 600 });
+    await tick(loopDeps({}));
+    expect(txs).toEqual([]);
+    job(1, { ...jobs.get(1)!, review_requested_at: NOW - 601 });
+    await tick(loopDeps({}));
+    expect(txs).toEqual(["mark_unresolved 1"]);
+  });
+  it("releases an Unresolved fee after seven days, not before", async () => {
+    job(1, { state: "unresolved", held: true, unresolved_since: NOW - 604_799 });
+    await tick(loopDeps({}));
+    expect(txs).toEqual([]);
+    job(1, { ...jobs.get(1)!, unresolved_since: NOW - 604_800 });
+    await tick(loopDeps({}));
+    expect(txs).toEqual(["release_unresolved 1"]);
+  });
+});
+
+describe("disputes on the job page and the company page", () => {
+  it("shows the dispute and the second review in order, and the review as secondary", async () => {
+    const q = await parsed(Quote402, await post("/v1/orders", order()));
+    store.putBlob("sha256:d", "NEAR Intents lets people swap across chains, and the fees stay low for everyone who uses them every day.");
+    job(42, { quote_id: q.quoteId, input_hash: q.input.inputHash, state: "delivered", codes: ["PASS"], review_requested_at: NOW - 460, reviewed_at: NOW - 450 });
+    const o = await parsed(Order, await get("/v1/orders/j_000042"));
+    expect(o.timeline.map((e) => e.event)).toEqual(["paid", "awarded", "delivered_for_review", "dispute", "second_review_pass"]);
+    expect(o.reviews[0]).toMatchObject({ mode: "secondary", pass: true });
+  });
+  it("an Unresolved job is public as unresolved with its timeline event and no delivery", async () => {
+    job(42, { state: "unresolved", held: true, unresolved_since: NOW - 100, review_requested_at: NOW - 400, codes: ["FAIL_LENGTH"] });
+    store.putBlob("sha256:d", "secret delivery");
+    const o = await parsed(OrderPayer, await post("/v1/orders/j_000042/view", await signed("view", "j_000042")));
+    expect(o.status).toBe("unresolved");
+    expect(o.delivery).toBeNull();
+    expect(o.timeline.map((e) => e.event)).toEqual(["paid", "awarded", "delivered_for_review", "review_fail", "dispute", "unresolved"]);
+  });
+  it("the company page counts disputes, caps unresolved workers and logs the incidents", async () => {
+    app = makeApp(fakeChain({ workers: async () => [
+      { id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], jobs: 4, first_pass: 3, final_fails: 1, disputes_won: 2, disputes_lost: 1, disputes_unresolved: 0, unresolved_open: 0, late: 0, suspended: false },
+      { id: "raven-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["140000", "80000", "180000"], jobs: 2, first_pass: 1, final_fails: 0, disputes_won: 0, disputes_lost: 0, disputes_unresolved: 1, unresolved_open: 2, late: 0, suspended: false },
+    ] }));
+    job(1, { state: "finalized", review_requested_at: NOW - 460, reviewed_at: NOW - 450 });
+    job(2, { state: "refunded", codes: ["FAIL_LENGTH"], review_requested_at: NOW - 400, reviewed_at: NOW - 390 });
+    job(3, { state: "unresolved", held: true, unresolved_since: NOW - 100, codes: [] });
+    const c = await parsed(Company, await get("/v1/company"));
+    expect(c.workers.map((w) => [w.id, w.disputesWon, w.disputesLost, w.unresolvedOpen, w.eligible, w.ineligibleReason])).toEqual([["crab", 2, 1, 0, true, null], ["raven", 0, 0, 2, false, "unresolved_cap"]]);
+    expect(c.incidents.map((i) => [i.orderId, i.kind, i.strike]).sort()).toEqual([["j_000001", "dispute_won", false], ["j_000002", "dispute", false], ["j_000003", "dispute", false]]);
+    for (const i of c.incidents) expect(i.text).not.toMatch(/[;—–]|\w-\w/);
   });
 });

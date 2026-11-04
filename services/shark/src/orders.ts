@@ -304,10 +304,15 @@ function orderView(job: ContractJob, row: QuoteRow | undefined, view: Order["vie
   const worker = ctx.idOf(job.worker);
   if (job.awarded_at) timeline.push({ at: iso(job.awarded_at), event: "awarded", ...(worker ? { worker } : {}), tx: auction?.award_tx ?? null });
   if (job.delivered_at) timeline.push({ at: iso(job.delivered_at), event: "delivered_for_review", round: job.round });
+  const secondary = isSecondary(job);
+  if (job.review_requested_at) timeline.push({ at: iso(job.review_requested_at), event: "dispute", ...(worker ? { worker } : {}) });
   if (job.reviewed_at) {
-    if (job.state === "revision") timeline.push({ at: iso(job.reviewed_at), event: "review_fail", round: 1 }, { at: iso(job.reviewed_at), event: "revision_requested", round: 2 });
+    if (secondary) timeline.push({ at: iso(job.reviewed_at), event: passed ? "second_review_pass" : "second_review_fail", round: 2 });
+    else if (job.state === "revision") timeline.push({ at: iso(job.reviewed_at), event: "review_fail", round: 1 }, { at: iso(job.reviewed_at), event: "revision_requested", round: 2 });
     else timeline.push({ at: iso(job.reviewed_at), event: passed ? "review_pass" : "review_fail", round: job.round });
   }
+  if (job.unresolved_since) timeline.push({ at: iso(job.unresolved_since), event: "unresolved" });
+  timeline.sort((a, b) => a.at.localeCompare(b.at)); // oldest first; equal times keep their order
 
   const workerFee = BigInt(job.worker_fee);
   const price = BigInt(job.price);
@@ -380,6 +385,9 @@ function deliveryOf(hash: string, brief: Brief, ctx: ViewCtx): OrderPayer["deliv
 
 /** The latest review, with per check results (v2.3 P4): code checks rerun here with the same library Owl uses, so
  * their detail is exact; model checks carry pass only. Owl skips the model check when a code check fails. */
+/** The last review was the second one (a dispute or an Unresolved job reviewed late). */
+const isSecondary = (job: ContractJob) => job.review_requested_at !== null && job.reviewed_at !== null && job.reviewed_at >= job.review_requested_at;
+
 function reviewOf(job: ContractJob, brief: Brief, codes: Order["reviews"][number]["codes"], ctx: ViewCtx): Order["reviews"][number] {
   const complaint = codes.some((c) => c.startsWith("COMPLAINT_"));
   const passed = codes.includes("PASS");
@@ -391,7 +399,7 @@ function reviewOf(job: ContractJob, brief: Brief, codes: Order["reviews"][number
   const reasons = (job.reasons_hash && ctx.blob(job.reasons_hash)) || (passed ? "All checks passed." : "The delivery did not pass review.");
   return {
     round: job.round,
-    mode: complaint ? "complaint" : "primary",
+    mode: complaint ? "complaint" : isSecondary(job) ? "secondary" : "primary",
     pass: complaint ? codes.includes("COMPLAINT_REJECTED") : passed,
     codes,
     reasons,

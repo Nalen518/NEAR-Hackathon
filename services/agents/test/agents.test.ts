@@ -12,7 +12,7 @@ import { canonicalJson } from "../../shark/src/quote";
 import { openStore } from "../../shark/src/store";
 import { agentMessage, sha256Ref, sharkFiles, type AgentChain, type Files, type Job, type ReviewResult } from "../src/near";
 import { judgeComplaint, plainCopy, review, reviewOnce } from "../src/owl";
-import { bidDigest, createWorkerApp, work } from "../src/worker";
+import { bidDigest, createWorkerApp, decideDispute, work } from "../src/worker";
 
 const NOW = 1_793_500_000;
 const crabKey = KeyPair.fromRandom("ed25519");
@@ -36,6 +36,7 @@ const GOOD = "NEAR Intents let users swap tokens across chains in one step, and 
 let blobs: Map<string, string>;
 let delivered: { job: number; hash: string }[];
 let reviewed: { job: number; result: ReviewResult }[];
+let disputed: number[];
 const files = (): Files => ({
   get: async (h) => {
     const b = blobs.get(h);
@@ -60,6 +61,7 @@ const chain = (): AgentChain => ({
   workers: async () => [{ id: "crab-worker.testnet", types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"], suspended: false }],
   deliver: async (job, hash) => void delivered.push({ job, hash }),
   onReview: async (job, result) => void reviewed.push({ job, result }),
+  dispute: async (job) => void disputed.push(job),
 });
 
 function job(over: Partial<Job> = {}): Job {
@@ -86,6 +88,7 @@ beforeEach(() => {
   jobs = new Map();
   delivered = [];
   reviewed = [];
+  disputed = [];
 });
 
 describe("formats match Shark exactly", () => {
@@ -211,5 +214,56 @@ describe("files client against the real Shark app", () => {
     expect(await crab.get(hash)).toBe("my delivery");
     expect(await via("owl-reviewer.testnet", owlKey).orderText(1)).toBe("Summarise please.");
     await expect(crab.orderText(1)).rejects.toThrow(/403/);
+  });
+});
+
+describe("worker: disputes (API 2.3, FR-45)", () => {
+  const deps = () => ({ name: "crab" as const, accountId: "crab-worker.testnet", key: crabKey.toString(), chain: chain(), files: files(), model: async () => "", perPage: 2_000n, etaSecs: 70, now: () => NOW, log: () => {} });
+  const window = { jobId: "j_000001", codes: ["FAIL_FAITHFULNESS"], reasons: "A claim is not in the source.", until: new Date((NOW + 3_000) * 1000).toISOString() };
+  const failed = (delivery: string) => job({ state: "failed", delivery_hash: put(delivery), codes: ["FAIL_FAITHFULNESS"] });
+
+  it("disputes a fail it can show was a model verdict: its delivery passes every code check", async () => {
+    failed(GOOD);
+    expect(await decideDispute(deps(), window)).toBe(true);
+    expect(disputed).toEqual([1]);
+  });
+  it("accepts a fail that a code check confirms", async () => {
+    failed("Way too short.");
+    expect(await decideDispute(deps(), window)).toBe(false);
+    expect(disputed).toEqual([]);
+  });
+  it("does nothing for someone else's job, a closed window or a job that isn't failed", async () => {
+    failed(GOOD);
+    expect(await decideDispute(deps(), { ...window, until: new Date((NOW - 1) * 1000).toISOString() })).toBe(false);
+    job({ state: "failed", worker: "raven-worker.testnet", delivery_hash: put(GOOD) });
+    expect(await decideDispute(deps(), window)).toBe(false);
+    job({ state: "review", delivery_hash: put(GOOD) });
+    expect(await decideDispute(deps(), window)).toBe(false);
+    expect(disputed).toEqual([]);
+  });
+  it("the HTTP route answers with the decision", async () => {
+    failed(GOOD);
+    const res = await createWorkerApp(deps()).request("/dispute-window", { method: "POST", body: JSON.stringify(window) });
+    expect(await res.json()).toEqual({ accepted: true, disputed: true });
+  });
+});
+
+describe("owl: second review (D-114, FR-45, FR-46)", () => {
+  const answer = JSON.stringify({ results: [{ id: "M1", pass: true }, { id: "M2", pass: true }], reasons: "Faithful." });
+  it("uses the secondary model and says it is a secondary review", async () => {
+    const primary = vi.fn(async () => answer);
+    const secondary = vi.fn(async () => answer);
+    const j = job({ state: "dispute_review", delivery_hash: put(GOOD) });
+    const r = await review({ chain: chain(), files: files(), model: primary, secondaryModel: secondary, log: () => {} }, j, "secondary");
+    expect(r).toMatchObject({ mode: "secondary", pass: true, codes: ["PASS"] });
+    expect(secondary).toHaveBeenCalledTimes(1);
+    expect(primary).not.toHaveBeenCalled();
+  });
+  it("reviewOnce reviews disputes and Unresolved jobs as secondary, and leaves failed jobs alone", async () => {
+    job({ id: 1, state: "dispute_review", delivery_hash: put(GOOD) });
+    job({ id: 2, state: "unresolved", delivery_hash: put(GOOD) });
+    job({ id: 3, state: "failed", delivery_hash: put(GOOD) });
+    await reviewOnce({ chain: chain(), files: files(), model: async () => answer, log: () => {} });
+    expect(reviewed.map((r) => [r.job, r.result.mode])).toEqual([[1, "secondary"], [2, "secondary"]]);
   });
 });

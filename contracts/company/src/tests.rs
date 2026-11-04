@@ -39,6 +39,9 @@ fn config() -> Config {
         suspend_threshold: 3,
         max_unresolved_open: 2,
         work_deadline_secs: 600,
+        review_deadline_secs: 600,
+        dispute_window_secs: 3_600,
+        unresolved_timeout_secs: 604_800,
         complaint_window_secs: 86_400,
         job_timeout_secs: 21_600,
     }
@@ -238,23 +241,6 @@ fn finalize_waits_for_the_complaint_window() {
 }
 
 #[test]
-fn fail_revise_fail_refunds_the_payer() {
-    let mut c = setup();
-    let id = delivered_job(&mut c);
-    review(&mut c, id, "primary", false, &["FAIL_LENGTH"], 1_200);
-    assert_eq!(c.get_job(id).unwrap().state, JobState::Revision);
-    ctx("crab.testnet", 1_300);
-    c.deliver(id, "sha256:d2".into());
-    review(&mut c, id, "primary", false, &["FAIL_LENGTH"], 1_400);
-    assert_eq!(c.get_job(id).unwrap().state, JobState::RefundDue);
-    assert_eq!(c.get_stats().reserve.0, 180_000); // the unpaid worker fee
-    assert_eq!(c.get_workers()[0].final_fails, 1);
-    ctx("anyone.testnet", 1_500);
-    c.pay_refund(id).detach();
-    assert_eq!(c.get_job(id).unwrap().state, JobState::Refunded);
-}
-
-#[test]
 #[should_panic(expected = "E_BAD_STATE")]
 fn a_refund_pays_once() {
     let mut c = setup();
@@ -358,4 +344,207 @@ fn roles_view() {
     let c = setup();
     let r = c.get_roles();
     assert_eq!((r.owner.as_str(), r.guardian.as_str(), r.shark.as_str(), r.network.as_str()), ("dao.testnet", "guardian.testnet", "shark.testnet", NET));
+}
+
+// ---------- disputes and Unresolved (FR-44 to FR-47) ----------
+
+/// Pay, award, escrow, deliver and fail twice. The job ends Failed at 1_400 with the dispute window open until 5_000.
+fn failed_job(c: &mut Contract, id: u64, qid: &str) {
+    assert_eq!(pay(c, &quote(qid, 600_000, "buyer.testnet"), "buyer.testnet", 600_000), 0);
+    ctx("shark.testnet", 1_010);
+    c.award(id, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+    ctx(usdc().as_str(), 1_011);
+    let _ = c.ft_on_transfer(acc("shark.testnet"), U128(230_000), format!("escrow:{id}"));
+    ctx("crab.testnet", 1_100);
+    c.deliver(id, "sha256:d".into());
+    review(c, id, "primary", false, &["FAIL_LENGTH"], 1_200);
+    ctx("crab.testnet", 1_300);
+    c.deliver(id, "sha256:d2".into());
+    review(c, id, "primary", false, &["FAIL_LENGTH"], 1_400);
+}
+
+fn seed_reserve(c: &mut Contract, amount: u128) {
+    ctx(usdc().as_str(), 1_000);
+    let _ = c.ft_on_transfer(acc("dao.testnet"), U128(amount), "reserve".into());
+}
+
+fn dispute_at(c: &mut Contract, id: u64, at: u64) {
+    ctx("crab.testnet", at);
+    c.dispute(id);
+}
+
+#[test]
+fn a_second_fail_opens_a_dispute_window_and_pays_no_one_else() {
+    let mut c = setup();
+    failed_job(&mut c, 1, "q_A");
+    let j = c.get_job(1).unwrap();
+    assert_eq!((j.state, j.dispute_until, j.escrowed), (JobState::Failed, Some(5_000), true));
+    let w = &c.get_workers()[0];
+    assert_eq!((w.jobs, w.final_fails, w.disputes_lost), (1, 0, 0));
+    assert_eq!(c.get_stats().reserve.0, 0);
+}
+
+#[test]
+fn no_dispute_means_refund_and_an_unpaid_worker() {
+    let mut c = setup();
+    failed_job(&mut c, 1, "q_A");
+    ctx("anyone.testnet", 5_001);
+    c.settle_failed(1);
+    assert_eq!(c.get_job(1).unwrap().state, JobState::RefundDue);
+    assert_eq!(c.get_stats().reserve.0, 180_000); // the unpaid worker fee
+    assert_eq!(c.get_workers()[0].final_fails, 1);
+    c.pay_refund(1).detach();
+    assert_eq!(c.get_job(1).unwrap().state, JobState::Refunded);
+}
+
+#[test]
+#[should_panic(expected = "E_WINDOW_CLOSED")]
+fn settle_failed_waits_for_the_window() {
+    let mut c = setup();
+    failed_job(&mut c, 1, "q_A");
+    ctx("anyone.testnet", 4_000);
+    c.settle_failed(1);
+}
+
+#[test]
+#[should_panic(expected = "E_WINDOW_CLOSED")]
+fn a_late_dispute_is_refused() {
+    let mut c = setup();
+    failed_job(&mut c, 1, "q_A");
+    dispute_at(&mut c, 1, 5_001);
+}
+
+#[test]
+#[should_panic(expected = "E_UNAUTHORIZED")]
+fn only_the_worker_disputes() {
+    let mut c = setup();
+    failed_job(&mut c, 1, "q_A");
+    ctx("stranger.testnet", 1_500);
+    c.dispute(1);
+}
+
+#[test]
+fn an_overturned_fail_pays_the_worker_and_delivers() {
+    let mut c = setup();
+    seed_reserve(&mut c, 1_000_000);
+    failed_job(&mut c, 1, "q_A");
+    dispute_at(&mut c, 1, 1_500);
+    assert_eq!(c.get_job(1).unwrap().state, JobState::DisputeReview);
+    review(&mut c, 1, "secondary", true, &["PASS"], 1_600);
+    let j = c.get_job(1).unwrap();
+    assert_eq!((j.state, j.escrowed, j.complaint_until), (JobState::Delivered, false, Some(1_600 + 86_400)));
+    let w = &c.get_workers()[0];
+    assert_eq!((w.disputes_won, w.final_fails), (1, 0));
+    assert_eq!(c.get_reviewer().unwrap().overturned, 1);
+    assert_eq!(c.get_stats().reserve.0, 950_000); // the second review fee came from the reserve
+}
+
+#[test]
+fn a_dispute_that_fails_refunds_and_counts_against_the_worker() {
+    let mut c = setup();
+    seed_reserve(&mut c, 1_000_000);
+    failed_job(&mut c, 1, "q_A");
+    dispute_at(&mut c, 1, 1_500);
+    review(&mut c, 1, "secondary", false, &["FAIL_LENGTH"], 1_600);
+    assert_eq!(c.get_job(1).unwrap().state, JobState::RefundDue);
+    let w = &c.get_workers()[0];
+    assert_eq!((w.disputes_lost, w.final_fails), (1, 0));
+    assert_eq!(c.get_stats().reserve.0, 1_000_000 + 180_000 - 50_000);
+}
+
+#[test]
+#[should_panic(expected = "E_TIMEOUT_NOT_REACHED")]
+fn unresolved_waits_for_the_review_deadline() {
+    let mut c = setup();
+    failed_job(&mut c, 1, "q_A");
+    dispute_at(&mut c, 1, 1_500);
+    ctx("anyone.testnet", 2_100); // asked at 1_500, deadline 600 s: must be after 2_100
+    c.mark_unresolved(1);
+}
+
+/// Dispute at 1_500, no review by 2_101, refund paid: the job is Unresolved with the fee held.
+fn unresolved_job(c: &mut Contract) {
+    failed_job(c, 1, "q_A");
+    dispute_at(c, 1, 1_500);
+    ctx("anyone.testnet", 2_101);
+    c.mark_unresolved(1);
+    assert_eq!(c.get_job(1).unwrap().state, JobState::RefundDue);
+    c.pay_refund(1).detach();
+}
+
+#[test]
+fn an_unavailable_reviewer_refunds_now_and_holds_the_fee() {
+    let mut c = setup();
+    unresolved_job(&mut c);
+    let j = c.get_job(1).unwrap();
+    assert_eq!((j.state, j.held, j.escrowed, j.unresolved_since), (JobState::Unresolved, true, true, Some(2_101)));
+    assert_eq!(c.get_workers()[0].unresolved_open, 1);
+    assert_eq!(c.get_stats().reserve.0, 0); // the fee is still in escrow, not the reserve
+}
+
+#[test]
+fn a_late_review_that_passes_pays_the_worker_after_the_refund() {
+    let mut c = setup();
+    unresolved_job(&mut c);
+    review(&mut c, 1, "secondary", true, &["PASS"], 3_000);
+    assert_eq!(c.get_job(1).unwrap().state, JobState::Refunded);
+    let w = &c.get_workers()[0];
+    assert_eq!((w.disputes_won, w.unresolved_open), (1, 0));
+}
+
+#[test]
+fn a_late_review_that_fails_returns_the_fee_to_the_reserve() {
+    let mut c = setup();
+    unresolved_job(&mut c);
+    review(&mut c, 1, "secondary", false, &["FAIL_LENGTH"], 3_000);
+    assert_eq!(c.get_job(1).unwrap().state, JobState::Refunded);
+    let w = &c.get_workers()[0];
+    assert_eq!((w.disputes_lost, w.unresolved_open), (1, 0));
+    assert_eq!(c.get_stats().reserve.0, 180_000);
+}
+
+#[test]
+fn seven_days_unresolved_releases_the_fee_to_the_worker() {
+    let mut c = setup();
+    unresolved_job(&mut c);
+    ctx("anyone.testnet", 2_101 + 604_800);
+    c.release_unresolved(1);
+    assert_eq!(c.get_job(1).unwrap().state, JobState::Refunded);
+    let w = &c.get_workers()[0];
+    assert_eq!((w.disputes_unresolved, w.unresolved_open), (1, 0));
+}
+
+#[test]
+#[should_panic(expected = "E_TIMEOUT_NOT_REACHED")]
+fn release_unresolved_waits_seven_days() {
+    let mut c = setup();
+    unresolved_job(&mut c);
+    ctx("anyone.testnet", 2_101 + 604_799);
+    c.release_unresolved(1);
+}
+
+#[test]
+#[should_panic(expected = "E_NOT_ELIGIBLE")]
+fn a_worker_at_the_unresolved_cap_cannot_win_an_award() {
+    let mut c = setup();
+    unresolved_job(&mut c);
+    ctx("dao.testnet", 3_000);
+    c.set_config(Config { max_unresolved_open: 1, ..config() });
+    pay(&mut c, &quote("q_B", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    ctx("shark.testnet", 3_010);
+    c.award(2, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+}
+
+#[test]
+fn final_fails_and_lost_disputes_suspend_the_worker() {
+    let mut c = setup();
+    for (i, q) in ["q_A", "q_B", "q_C"].iter().enumerate() {
+        failed_job(&mut c, (i + 1) as u64, q);
+    }
+    ctx("anyone.testnet", 5_001);
+    c.settle_failed(1);
+    c.settle_failed(2);
+    assert!(!c.get_workers()[0].suspended);
+    c.settle_failed(3);
+    assert!(c.get_workers()[0].suspended);
 }
