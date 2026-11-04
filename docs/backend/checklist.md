@@ -7,10 +7,10 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 
 **How "done" is checked:** every response is parsed with the web's schemas from `packages/shared` in `services/shark/test/contract.test.ts`, against a fake chain. Nothing has run on testnet yet.
 
-Last updated: 4 Nov 2026 (after `110076b`)
+Last updated: 4 Nov 2026 (after `c4b6b93`)
 
 ## Resume here (next session)
-Start at "Next" item 3: the contract's `pay_owners`, `fund_shark`, `wind_down`, late worker re-auction, the storage deposit in `pay_refund` and an owed ledger for failed payouts. Tests at the last commit: Shark 65, agents 22, checks 12, shared 25, web 47, contract 36. Nothing is deployed and nothing is pushed.
+Start at "Next" item 4: x402 (the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` checks, contract `mark_paid_x402` and `return_x402`). Tests at the last commit: Shark 68, agents 22, checks 12, shared 25, web 47, contract 53. Nothing is deployed and nothing is pushed.
 
 ## A. Must (the web goes live on these)
 
@@ -58,7 +58,7 @@ Start at "Next" item 3: the contract's `pay_owners`, `fund_shark`, `wind_down`, 
 | --- | --- | --- |
 | 1 | C1 recent quotes, C3 fixes with prices, C2 auctions log, `out_of_budget` state | ✅ `fd56a27` |
 | 2 | Contract: disputes and Unresolved (FR-44 to FR-47), Shark loop and timeline for them, worker dispute decision, Owl second review | ✅ `110076b` |
-| 3 | Contract: `pay_owners`, `fund_shark`, `wind_down`, late worker re-auction, storage deposit in `pay_refund`, an owed ledger for failed payouts | ⬜ |
+| 3 | Contract: `pay_owners`, `fund_shark`, `wind_down`, late worker re-auction, storage deposit in `pay_refund`, an owed ledger for failed payouts; Shark keepers for all of them | ✅ `c4b6b93` |
 | 4 | x402: the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` checks, contract `mark_paid_x402` and `return_x402` | ⬜ |
 | 5 | Event reader (NEP-297 logs) for B1 tx links, the payouts list, RETURNED quotes and the incidents log | ⬜ |
 | 6 | `GET /v1/openapi.json` (FR-14) | ⬜ |
@@ -66,7 +66,7 @@ Start at "Next" item 3: the contract's `pay_owners`, `fund_shark`, `wind_down`, 
 | 8 | Rust port of the code checks, for Owl in the OutLayer TEE (NFR-02) | ⬜ |
 
 ## Later: needs a wallet 🔒 or NEAR AI 🧠
-- 🔒 Testnet deploy: contract init, register workers and Owl, USDC storage registrations, reserve seed, agent keys, then A12.
+- 🔒 Testnet deploy: contract init (`new` now takes the Shark wallet account), fund the contract with a little NEAR, register workers and Owl, USDC storage registrations, reserve seed, agent keys, then A12.
 - 🔒 x402 settlement through our own facilitator (a funded relayer account).
 - 🧠 Running Crab, Raven and Owl for real (built and tested with a fake model in `a37ad08`). Pick models (O-06).
 - 🧠 The safety filter on NEAR AI (a pattern list for now).
@@ -77,7 +77,8 @@ Start at "Next" item 3: the contract's `pay_owners`, `fund_shark`, `wind_down`, 
 - Escrow comes from a plain testnet wallet account, not the OutLayer custody wallet.
 - Reviews are posted by Owl's own account, not an OutLayer callback, so there is no attestation.
 - The safety filter is a pattern list.
-- A failed worker, reviewer or referral payout is parked in the reserve.
+- The daily keepers and the hourly owed retries run from Shark's own wallet account, which pays the gas.
+- The contract needs about 0.01 NEAR of its own for the refund storage deposit; the deploy has to fund it.
 - The second review fee is capped at what the reserve holds.
 - Suspension counts final fails plus lost disputes over a worker's whole record, not the last 20 jobs.
 - A worker disputes only when its own delivery passes every code check.
