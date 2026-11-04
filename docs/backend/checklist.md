@@ -7,10 +7,10 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 
 **How "done" is checked:** every response is parsed with the web's schemas from `packages/shared` in `services/shark/test/contract.test.ts`, against a fake chain. Nothing has run on testnet yet.
 
-Last updated: 4 Nov 2026 (after `99cb32a`)
+Last updated: 4 Nov 2026 (after `e90fa9f`)
 
 ## Resume here (next session)
-Next on the list: 4b (our own x402 facilitator service), 7 (sandbox tests of the real wasm in Docker) and 8 (Rust port of the code checks). Tests at the last commit: Shark 91, agents 22, checks 12, shared 25, web 47, contract 68. Nothing is deployed and nothing is pushed.
+Next on the list: 7 (sandbox tests of the real wasm in Docker, with a test USDC contract) and 8 (Rust port of the code checks). Tests at the last commit: Shark 91, facilitator 11, agents 22, checks 12, shared 25, web 47, contract 68. Nothing is deployed and nothing is pushed.
 
 ## A. Must (the web goes live on these)
 
@@ -63,7 +63,7 @@ Next on the list: 4b (our own x402 facilitator service), 7 (sandbox tests of the
 | 2 | Contract: disputes and Unresolved (FR-44 to FR-47), Shark loop and timeline for them, worker dispute decision, Owl second review | ✅ `110076b` |
 | 3 | Contract: `pay_owners`, `fund_shark`, `wind_down`, late worker re-auction, storage deposit in `pay_refund`, an owed ledger for failed payouts; Shark keepers for all of them | ✅ `c4b6b93` |
 | 4 | x402: the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` flow with a facilitator client, contract `mark_paid_x402` and `return_x402` (balance checked in a callback) | ✅ `5a8ac61` |
-| 4b | Our own x402 facilitator service on `@x402/near` (`/verify`, `/settle`, `/supported`), fake signer in tests | ⬜ |
+| 4b | Our own x402 facilitator service on `@x402/near` (`/verify`, `/settle`, `/supported`); closed without Shark's API key and limited to our USDC and contract | ✅ `e90fa9f` |
 | 5 | Event reader for B1 tx links, the payouts list and RETURNED quotes | ✅ `e224e9d` (incidents for late work and strikes still come from job state) |
 | 6 | `GET /v1/openapi.json` (FR-14) | ✅ `99cb32a` OpenAPI 3.1 from the shared schemas; a test checks it lists exactly the served routes |
 | 7 | Sandbox tests of the real wasm in Docker (full job path) | ⬜ |
@@ -71,8 +71,8 @@ Next on the list: 4b (our own x402 facilitator service), 7 (sandbox tests of the
 
 ## Later: needs a wallet 🔒 or NEAR AI 🧠
 - 🔒 Testnet deploy: contract init (`new` now takes the Shark wallet account), fund the contract with a little NEAR, register workers and Owl, USDC storage registrations, reserve seed, agent keys, then A12.
-- 🔒 x402 settlement through our own facilitator (a funded relayer account) or FastNEAR's (needs an API key, requested by a GitHub issue, reviewed by hand).
-- x402: confirm the facilitator's `/verify` and `/settle` request keys against its `/openapi.yaml` (O-26) before the first real payment; the code uses `x402Version`, `paymentPayload`, `paymentRequirements`.
+- 🔒 Run our facilitator (`services/facilitator`): create and fund the relayer account (`x402-relayer.sharkco.testnet`), set `X402_RELAYER_KEY` and `X402_API_KEY`, point Shark's `TESTNET_X402_FACILITATOR_URL` at it. Or use FastNEAR's (needs an API key, requested by a GitHub issue, reviewed by hand).
+- x402 with FastNEAR's hosted facilitator instead of ours: confirm its `/openapi.yaml` uses the same keys as `@x402/core` (`x402Version`, `paymentPayload`, `paymentRequirements`). Ours is checked against the library's types.
 - 🧠 Running Crab, Raven and Owl for real (built and tested with a fake model in `a37ad08`). Pick models (O-06).
 - 🧠 The safety filter on NEAR AI (a pattern list for now).
 - 🔒🧠 Owl in the OutLayer TEE with attestation (O-03, O-13). Raven paid on Base via Chain Signatures (FR-60). The owners' DAO (O-09). The OutLayer custody wallet for Shark (D-144).
