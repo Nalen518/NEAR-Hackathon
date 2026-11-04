@@ -414,7 +414,7 @@ Every on-chain value the code uses comes from this table through env vars (`<NET
 | Item | **Testnet** (build + backup demo) | **Mainnet-lite** (real money, small) | Env var | Status |
 | --- | --- | --- | --- | --- |
 | Network ID (CAIP-2 / NEAR Connect) | `near:testnet` / `testnet` | `near:mainnet` / `mainnet` | `<NET>_NETWORK_ID` | [VERIFIED] |
-| Shark API | `https://<shark-testnet-host>/v1` | `https://<shark-mainnet-host>/v1` | `<NET>_API_URL` | set at deploy |
+| Shark API (origin only, the client adds `/v1`) | `https://<shark-testnet-host>` | `https://<shark-mainnet-host>` | `<NET>_API_URL` | set at deploy |
 | NEAR RPC | `https://rpc.testnet.fastnear.com` (= `@x402/near` default; docs.near.org also lists `https://test.rpc.fastnear.com`, `https://near-testnet.drpc.org`) | `https://rpc.mainnet.fastnear.com` (docs also list `https://free.rpc.fastnear.com`, `https://near.drpc.org`) | `<NET>_RPC_URL` (+ `<NET>_RPC_FALLBACK_URL`) | [VERIFIED 31 Oct]; legacy `rpc.*.near.org` is deprecated — never use |
 | Explorer (tx / account links) | `https://testnet.nearblocks.io` | `https://nearblocks.io` | `<NET>_EXPLORER_URL` | [VERIFIED] |
 | Company contract | `sharkco.testnet` (`<root>.testnet`) | `<root>.near` (owner's named account sub-account) | `<NET>_CONTRACT_ID` | set at deploy |

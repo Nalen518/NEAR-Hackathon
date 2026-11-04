@@ -17,7 +17,8 @@ The backend is built and tested on a fake chain and a local NEAR node. It has **
 3. **`company.owners` is always `sample: true` by decision** (no DAO yet). Keep the SAMPLE label there.
 4. **`pnl7d.ownersPaid` is real now** (a new contract counter). It covers the last 7 days once Shark has run for a week. Before that it shows everything paid.
 5. **`config.changedAt` and `config.changeTx` are real.** `changedByProposal` stays `null`. Show the tx as a link when it is set.
-6. `payouts` is `sample: true` when Shark's event reader is switched off (`TESTNET_EVENTS_URL=off`). The web already reads the flag.
+6. **Sign again after 5 minutes.** The payer view signature is good for 5 minutes (the same signature may be sent again for the same order, D-173). `JobView.tsx` refetches every 5 s with the one it signed at the start, so from minute 6 every refetch is `401 payer_signature_invalid`. When that happens, ask the wallet to sign again, or fall back to the public view until the user clicks sign in again.
+7. `payouts` is `sample: true` when Shark's event reader is switched off (`TESTNET_EVENTS_URL=off`). The web already reads the flag.
 
 ## 3. What W6 needs from the web (not started)
 

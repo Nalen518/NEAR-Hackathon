@@ -55,9 +55,10 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 - Raven gas read has a 4 s timeout and logs its errors.
 - `/v1/company`, `/v1/prices` and `/v1/health` are kept for `CACHE_SECS` (10), and concurrent calls share one read.
 - A suspended worker with no `suspend` call keeps the time Shark first saw it.
-- Payer view: the same signature may be sent again for the same account and order until it is 5 minutes old (owner decision). A complaint signature still works once. `API-CONTRACT.md` line 253 says so. This still needs an entry in `DECISIONS.md`.
+- Payer view: the same signature may be sent again for the same account and order until it is 5 minutes old (owner decision). A complaint signature still works once. `API-CONTRACT.md` line 253 says so. See `DECISIONS.md` D-173.
 - Runbook: a changed contract needs a fresh account, the web API URL is the origin only, and the proxy must add the client address.
-- Not done from the review (nice to have): pruning old nonces and seen-times, retrying an escrow the contract gave back.
+- Old nonces (over a day) are dropped when Shark starts, and the "first seen" notes for paid refunds, retried payouts and reinstated workers are forgotten. An escrow that has not shown up on chain after 2 minutes is sent again (the contract refuses a second one for an escrowed job). `wind_down` has its own wording in the incident text.
+- `DECISIONS.md` D-173 records the payer view signature reuse and the API URL being an origin.
 
 ## Schema bugs found and fixed
 - `X402PaymentRequired` had the x402 v1 shape. Now v2 (`resource` at the top, `accepts[]` are PaymentRequirements), with a new fixture; Shark's tests parse the header it really sends.
