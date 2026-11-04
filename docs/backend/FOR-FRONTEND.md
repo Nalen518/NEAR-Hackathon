@@ -23,7 +23,7 @@ The backend is built and tested on a fake chain and a local NEAR node. It has **
 
 - **Real wallet.** NEAR Wallet Selector with `signAndSendTransaction` and `signMessage` (NEP-413, recipient and nonce as in the API contract). `NEXT_PUBLIC_TESTNET_WALLETS` is empty until then.
 - **Payment.** The 402 response carries `pay.args` for `ft_transfer_call` (attach 1 yocto, 100 Tgas). If `quote.payerRegistered` is false the wallet must first call `register` (a `storage_deposit` on the USDC token). The order flow already has the button.
-- **Env values** (after the deploy, see `docs/backend/DEPLOY-TESTNET.md` section 8): `NEXT_PUBLIC_API_MODE=live`, API URL ending in `/v1`, RPC, contract, USDC, faucet and both explorer URLs.
+- **Env values** (after the deploy, see `docs/backend/DEPLOY-TESTNET.md` section 8): `NEXT_PUBLIC_API_MODE=live`, `NEXT_PUBLIC_TESTNET_API_URL` is the origin only, e.g. `http://localhost:8787` (the client adds `/v1/...` itself), RPC, contract, USDC, faucet and both explorer URLs.
 - **CORS.** Shark allows `http://localhost:3100` and whatever the owner puts in `WEB_ORIGINS`. The deployed web origin must be added there.
 - **First live run.** Use the Playwright specs against a local Shark first. Any response that fails a zod schema is a backend bug: send the response body back to the backend agent.
 
@@ -32,5 +32,7 @@ The backend is built and tested on a fake chain and a local NEAR node. It has **
 - Money is a decimal string with at most 6 places. Times are ISO 8601 UTC with `Z`. Lists are newest first except `timeline`.
 - The public order view never has instructions or delivery. The payer view needs a valid NEP-413 signature, else `401 payer_signature_invalid`. `delivery` is `null` until a review passes.
 - All text the web shows follows D-170. The backend tests check its own strings for it.
-- `GET /v1/company` is one call that reads about 15 RPC values. Do not poll it faster than every 10 seconds. Shark has no cache on it yet, so it is the slowest endpoint.
+- `GET /v1/company`, `/v1/prices` and `/v1/health` are kept in Shark's memory for 10 seconds (`CACHE_SECS`), so polling faster than that gains nothing.
+- **Payer view signature:** it may be sent again with the same signature for the same account and order until it is 5 minutes old, so the 5 s refresh in `JobView.tsx` works. After 5 minutes the page has to sign again. A complaint signature works once.
+- Rate limit: 30 requests a minute per client IP (the last `x-forwarded-for` value). The job page polls about 25 a minute, so slow the polling or keep to one tab.
 - `GET /v1/openapi.json` lists every route and is checked against the served routes in a test.

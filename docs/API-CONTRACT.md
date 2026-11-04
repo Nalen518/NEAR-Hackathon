@@ -250,7 +250,7 @@ Base URL `https://<shark-host>/v1`. No authentication: payment is the authentica
 ```json
 { "accountId": "demo-buyer.testnet", "publicKey": "ed25519:…", "signature": "<base64>", "message": "sharkco:view:j_000042:1793521364", "nonce": "<base64 32 bytes>", "recipient": "sharkco.testnet" }
 ```
-`recipient` = this network's company contract id. Shark checks: the NEP-413 signature, `recipient`, the public key is a key of that account on **this network** (`view_access_key`), timestamp ≤ 5 min old, nonce not used before, then `accountId` = the order's payer. Response `200` = payer view with `Cache-Control: private, no-store`. Errors: `401 payer_signature_invalid`, `403 not_payer`, `404 order_not_found`.
+`recipient` = this network's company contract id. Shark checks: the NEP-413 signature, `recipient`, the public key is a key of that account on **this network** (`view_access_key`), timestamp ≤ 5 min old, nonce not used before (the one exception: the payer view accepts the same signature again for the same account and order until it is 5 minutes old, so the page can refresh), then `accountId` = the order's payer. Response `200` = payer view with `Cache-Control: private, no-store`. Errors: `401 payer_signature_invalid`, `403 not_payer`, `404 order_not_found`.
 
 ### 1.6 `POST /v1/orders/{orderId}/complaint`
 `{ "reason": "I asked for bullet points, the brief said paragraph.", "auth": { "…": "§1.5a body, message sharkco:complain:<orderId>:<ts>" } }` (reason ≤ 1 000 chars), only from the payer, only while `complaint.allowedUntil` is in the future → `202 { "status": "complaint_review" }`. Errors: `401 payer_signature_invalid`, `403 not_payer`, `409 complaint_closed`, `429 rate_limited`.

@@ -78,6 +78,7 @@ Expect: the right owner, guardian, Shark, wallet and USDC in `get_roles`; `reser
 | `TESTNET_CRAB_URL`, `TESTNET_RAVEN_URL` | where the agents listen, Crab `http://localhost:8788`, Raven `http://localhost:8789` by default |
 | `TESTNET_USDC_FAUCET_URL` | `https://faucet.circle.com` |
 | `WEB_ORIGINS` | `http://localhost:3100` plus the deployed web origin, comma separated |
+| `CACHE_SECS` | optional, default 10: how long `/v1/company`, `/v1/prices` and `/v1/health` are kept in memory |
 | `PUBLIC_BASE_URL` | where agents reach this Shark |
 | `TESTNET_EVM_RPC_URL`, `TESTNET_RAVEN_EVM_ADDRESS` | optional: the gas gauge on the company page. Placeholder until set |
 
@@ -129,7 +130,7 @@ In `apps/web/.env.local`:
 
 ```
 NEXT_PUBLIC_API_MODE=live
-NEXT_PUBLIC_TESTNET_API_URL=http://localhost:8787/v1
+NEXT_PUBLIC_TESTNET_API_URL=http://localhost:8787
 NEXT_PUBLIC_TESTNET_RPC_URL=<same RPC as Shark>
 NEXT_PUBLIC_TESTNET_CONTRACT_ID=<contract>
 NEXT_PUBLIC_TESTNET_USDC_ID=<usdc>
@@ -147,4 +148,6 @@ The wallet list (`NEXT_PUBLIC_TESTNET_WALLETS`) waits for W6.
 - The owner can `set_config`. `wind_down` (after a pause, with nothing open or owed) sends all USDC to the owner account and closes the contract.
 - Nothing here touches mainnet. If any command names a mainnet account or RPC, stop.
 - The contract has no `set_owner`. Moving to a DAO later means a redeploy on testnet. Decide that before the final demo.
+- **A changed contract cannot be deployed over the old one.** The contract saves its state in a fixed layout, so after any change to its fields the new code on the same account fails every call with "cannot deserialize the contract state". Redeploy to a fresh account (for example `sharkco-2.testnet`) and change `contract` in `accounts.local.json`, `TESTNET_CONTRACT_ID` in the `.env` files and the web's contract id. Or delete the account and create it again.
+- **Behind a proxy:** Shark's rate limit uses the last `x-forwarded-for` value. Use a host whose proxy adds the real client address (Railway and Fly do), not one that passes the header through unchanged.
 - Keep `contracts/deploy/accounts.local.json` and every `.env*` file out of git. The commit hook runs a secret scan.
