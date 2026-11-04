@@ -1,0 +1,69 @@
+{
+  "brief": {
+    "jobType": "thread",
+    "params": {
+      "posts": 2,
+      "mustInclude": [
+        "https://example.com/launch",
+        "#NEAR",
+        "@example_brand"
+      ],
+      "tone": "neutral"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "post_count == 2"
+      },
+      {
+        "id": "C2",
+        "kind": "code",
+        "rule": "post_length <= 280"
+      },
+      {
+        "id": "C3",
+        "kind": "code",
+        "rule": "includes_all"
+      },
+      {
+        "id": "C4",
+        "kind": "code",
+        "rule": "no_extra_handles"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "on topic"
+      }
+    ],
+    "deliverableFormat": "application/json"
+  },
+  "source": "",
+  "delivery": "{\"posts\":[\"We launched today with @example_brand #NEAR\",\"Read more https://example.com/launch\"]}",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": true,
+        "detail": "2 posts"
+      },
+      {
+        "id": "C2",
+        "pass": true,
+        "detail": "longest 43"
+      },
+      {
+        "id": "C3",
+        "pass": true,
+        "detail": "all found"
+      },
+      {
+        "id": "C4",
+        "pass": true,
+        "detail": "none extra"
+      }
+    ],
+    "codes": []
+  }
+}

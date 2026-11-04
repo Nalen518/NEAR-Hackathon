@@ -1,0 +1,10 @@
+[package]
+name = "shark-checks"
+description = "Deterministic code checks per job type: the Rust port of packages/checks, for Owl in the TEE"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+regex = "1"
+serde_json = "1"

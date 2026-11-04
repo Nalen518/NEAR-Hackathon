@@ -1,0 +1,39 @@
+{
+  "brief": {
+    "jobType": "summary",
+    "params": {
+      "maxWords": 20,
+      "mustMention": [
+        "NEAR Intents",
+        "fees"
+      ],
+      "language": "en",
+      "format": "bullets"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "format == bullets"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "every claim is supported by the source"
+      }
+    ],
+    "deliverableFormat": "text/plain"
+  },
+  "source": "",
+  "delivery": "- one\n- two\n3. three",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": true,
+        "detail": "3 bullets"
+      }
+    ],
+    "codes": []
+  }
+}

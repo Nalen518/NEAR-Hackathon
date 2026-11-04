@@ -1,0 +1,38 @@
+{
+  "brief": {
+    "jobType": "summary",
+    "params": {
+      "maxWords": 20,
+      "mustMention": [
+        "NEAR Intents"
+      ],
+      "language": "en",
+      "format": "paragraph"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "mentions_all"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "every claim is supported by the source"
+      }
+    ],
+    "deliverableFormat": "text/plain"
+  },
+  "source": "",
+  "delivery": "near   INTENTS is mentioned.",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": true,
+        "detail": "all found"
+      }
+    ],
+    "codes": []
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "brief": {
+    "jobType": "extract",
+    "params": {
+      "schema": {
+        "fields": [
+          {
+            "name": "name",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "price",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "date",
+            "type": "date",
+            "required": false
+          }
+        ]
+      },
+      "many": true,
+      "maxRecords": 3
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "json_parses"
+      },
+      {
+        "id": "C2",
+        "kind": "code",
+        "rule": "matches_schema"
+      },
+      {
+        "id": "C3",
+        "kind": "code",
+        "rule": "required_fields_filled"
+      },
+      {
+        "id": "C4",
+        "kind": "code",
+        "rule": "traceable >= 90%"
+      },
+      {
+        "id": "C5",
+        "kind": "code",
+        "rule": "records <= 3"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "no invented records"
+      }
+    ],
+    "deliverableFormat": "application/json"
+  },
+  "source": "A 2026-02-30 B 2026-10-01 C 2024-02-29 D 2026-13-01 E 2026-10-01T09:30:00Z F Oct 1",
+  "delivery": "[{\"name\":\"A\",\"price\":1,\"date\":\"2026-02-30\"},{\"name\":\"B\",\"price\":1,\"date\":\"2026-10-01\"},{\"name\":\"C\",\"price\":1,\"date\":\"2024-02-29\"},{\"name\":\"D\",\"price\":1,\"date\":\"2026-13-01\"},{\"name\":\"E\",\"price\":1,\"date\":\"2026-10-01T09:30:00Z\"},{\"name\":\"F\",\"price\":1,\"date\":\"Oct 1\"}]",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": true,
+        "detail": "valid JSON"
+      },
+      {
+        "id": "C2",
+        "pass": false,
+        "detail": "3 records off schema",
+        "code": "FAIL_SCHEMA"
+      },
+      {
+        "id": "C3",
+        "pass": true,
+        "detail": "all filled"
+      },
+      {
+        "id": "C4",
+        "pass": true,
+        "detail": "100% found"
+      },
+      {
+        "id": "C5",
+        "pass": false,
+        "detail": "6 records",
+        "code": "FAIL_LENGTH"
+      }
+    ],
+    "codes": [
+      "FAIL_SCHEMA",
+      "FAIL_LENGTH"
+    ]
+  }
+}

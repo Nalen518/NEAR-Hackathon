@@ -39,7 +39,7 @@ function fieldOk(f: Field, v: unknown): boolean {
     case "string":
       return typeof v === "string";
     case "date":
-      return typeof v === "string" && !Number.isNaN(Date.parse(v));
+      return typeof v === "string" && isoDate(v);
     case "url":
       return typeof v === "string" && /^https?:\/\/\S+$/.test(v);
     case "enum":
@@ -47,12 +47,19 @@ function fieldOk(f: Field, v: unknown): boolean {
   }
 }
 
-/** A value counts as traceable when its text (or a number's digits) appears in the normalized snapshot. */
+/** ISO 8601 date, or date and time, with a real calendar day. Stricter than Date.parse on purpose: the Rust port (owl/checks) matches it exactly. */
+function isoDate(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(s);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
+  return mo >= 1 && mo <= 12 && d >= 1 && d <= days && (m[4] === undefined || (Number(m[4]) < 24 && Number(m[5]) < 60 && (m[6] === undefined || Number(m[6]) < 60)));
+}
+
+/** A value counts as traceable when its text appears in the normalized snapshot, or a number equals one of the snapshot's numbers ("1,200" is 1200, "12.50" is 12.5). */
 function traceable(v: unknown, source: string): boolean {
-  if (typeof v === "number") {
-    const digits = source.replace(/(\d)[,\s](?=\d{3}\b)/g, "$1");
-    return digits.includes(String(v)) || digits.includes(v.toFixed(2));
-  }
+  if (typeof v === "number") return (source.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).some((t) => Math.abs(Number(t.replace(/,/g, "")) - v) < 1e-9);
   return typeof v === "string" && source.includes(norm(v));
 }
 

@@ -1,0 +1,75 @@
+{
+  "brief": {
+    "jobType": "thread",
+    "params": {
+      "posts": 2,
+      "mustInclude": [
+        "https://example.com/launch",
+        "#NEAR",
+        "@example_brand"
+      ],
+      "tone": "neutral"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "post_count == 2"
+      },
+      {
+        "id": "C2",
+        "kind": "code",
+        "rule": "post_length <= 280"
+      },
+      {
+        "id": "C3",
+        "kind": "code",
+        "rule": "includes_all"
+      },
+      {
+        "id": "C4",
+        "kind": "code",
+        "rule": "no_extra_handles"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "on topic"
+      }
+    ],
+    "deliverableFormat": "application/json"
+  },
+  "source": "",
+  "delivery": "post one\npost two",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": false,
+        "detail": "not a thread",
+        "code": "FAIL_FORMAT"
+      },
+      {
+        "id": "C2",
+        "pass": false,
+        "detail": "not a thread",
+        "code": "FAIL_FORMAT"
+      },
+      {
+        "id": "C3",
+        "pass": false,
+        "detail": "not a thread",
+        "code": "FAIL_FORMAT"
+      },
+      {
+        "id": "C4",
+        "pass": false,
+        "detail": "not a thread",
+        "code": "FAIL_FORMAT"
+      }
+    ],
+    "codes": [
+      "FAIL_FORMAT"
+    ]
+  }
+}

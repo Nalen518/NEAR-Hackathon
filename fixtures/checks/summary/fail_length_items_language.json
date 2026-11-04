@@ -1,0 +1,66 @@
+{
+  "brief": {
+    "jobType": "summary",
+    "params": {
+      "maxWords": 20,
+      "mustMention": [
+        "NEAR Intents",
+        "fees"
+      ],
+      "language": "en",
+      "format": "paragraph"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "word_count <= 20"
+      },
+      {
+        "id": "C2",
+        "kind": "code",
+        "rule": "mentions_all"
+      },
+      {
+        "id": "C3",
+        "kind": "code",
+        "rule": "language == en"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "every claim is supported by the source"
+      }
+    ],
+    "deliverableFormat": "text/plain"
+  },
+  "source": "",
+  "delivery": "Ceci est un résumé très long qui ne parle pas du sujet demandé et qui dépasse la limite de mots fixée pour ce travail précis.",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": false,
+        "detail": "25 words",
+        "code": "FAIL_LENGTH"
+      },
+      {
+        "id": "C2",
+        "pass": false,
+        "detail": "0 of 2 found",
+        "code": "FAIL_MISSING_ITEM"
+      },
+      {
+        "id": "C3",
+        "pass": false,
+        "detail": "en",
+        "code": "FAIL_FORMAT"
+      }
+    ],
+    "codes": [
+      "FAIL_LENGTH",
+      "FAIL_MISSING_ITEM",
+      "FAIL_FORMAT"
+    ]
+  }
+}

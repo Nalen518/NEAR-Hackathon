@@ -1,0 +1,78 @@
+{
+  "brief": {
+    "jobType": "thread",
+    "params": {
+      "posts": 2,
+      "mustInclude": [
+        "https://example.com/launch",
+        "#NEAR",
+        "@example_brand"
+      ],
+      "tone": "neutral"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "post_count == 2"
+      },
+      {
+        "id": "C2",
+        "kind": "code",
+        "rule": "post_length <= 280"
+      },
+      {
+        "id": "C3",
+        "kind": "code",
+        "rule": "includes_all"
+      },
+      {
+        "id": "C4",
+        "kind": "code",
+        "rule": "no_extra_handles"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "on topic"
+      }
+    ],
+    "deliverableFormat": "application/json"
+  },
+  "source": "",
+  "delivery": "{\"posts\":[\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx @someone_else\"]}",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": false,
+        "detail": "1 post",
+        "code": "FAIL_FORMAT"
+      },
+      {
+        "id": "C2",
+        "pass": false,
+        "detail": "longest 295",
+        "code": "FAIL_LENGTH"
+      },
+      {
+        "id": "C3",
+        "pass": false,
+        "detail": "0 of 3 found",
+        "code": "FAIL_MISSING_ITEM"
+      },
+      {
+        "id": "C4",
+        "pass": false,
+        "detail": "1 extra handle",
+        "code": "FAIL_SAFETY"
+      }
+    ],
+    "codes": [
+      "FAIL_FORMAT",
+      "FAIL_LENGTH",
+      "FAIL_MISSING_ITEM",
+      "FAIL_SAFETY"
+    ]
+  }
+}

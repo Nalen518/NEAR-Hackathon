@@ -1,0 +1,59 @@
+{
+  "brief": {
+    "jobType": "summary",
+    "params": {
+      "maxWords": 20,
+      "mustMention": [
+        "NEAR Intents",
+        "fees"
+      ],
+      "language": "en",
+      "format": "paragraph"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "word_count <= 20"
+      },
+      {
+        "id": "C2",
+        "kind": "code",
+        "rule": "mentions_all"
+      },
+      {
+        "id": "C3",
+        "kind": "code",
+        "rule": "language == en"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "every claim is supported by the source"
+      }
+    ],
+    "deliverableFormat": "text/plain"
+  },
+  "source": "",
+  "delivery": "NEAR Intents lets people swap across chains and the fees are low for everyone.",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": true,
+        "detail": "14 words"
+      },
+      {
+        "id": "C2",
+        "pass": true,
+        "detail": "both found"
+      },
+      {
+        "id": "C3",
+        "pass": true,
+        "detail": "en"
+      }
+    ],
+    "codes": []
+  }
+}

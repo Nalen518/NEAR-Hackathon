@@ -1,0 +1,101 @@
+{
+  "brief": {
+    "jobType": "extract",
+    "params": {
+      "schema": {
+        "fields": [
+          {
+            "name": "name",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "price",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "date",
+            "type": "date",
+            "required": false
+          }
+        ]
+      },
+      "many": true,
+      "maxRecords": 3
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "json_parses"
+      },
+      {
+        "id": "C2",
+        "kind": "code",
+        "rule": "matches_schema"
+      },
+      {
+        "id": "C3",
+        "kind": "code",
+        "rule": "required_fields_filled"
+      },
+      {
+        "id": "C4",
+        "kind": "code",
+        "rule": "traceable >= 90%"
+      },
+      {
+        "id": "C5",
+        "kind": "code",
+        "rule": "records <= 3"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "no invented records"
+      }
+    ],
+    "deliverableFormat": "application/json"
+  },
+  "source": "Our catalogue: Blue Mug costs 12.50 since 2026-10-01. Red Plate costs 1,200 since 2026-09-15.",
+  "delivery": "Blue Mug, 12.50",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": false,
+        "detail": "not JSON",
+        "code": "FAIL_FORMAT"
+      },
+      {
+        "id": "C2",
+        "pass": false,
+        "detail": "not JSON",
+        "code": "FAIL_SCHEMA"
+      },
+      {
+        "id": "C3",
+        "pass": false,
+        "detail": "not JSON",
+        "code": "FAIL_FORMAT"
+      },
+      {
+        "id": "C4",
+        "pass": false,
+        "detail": "not JSON",
+        "code": "FAIL_FORMAT"
+      },
+      {
+        "id": "C5",
+        "pass": false,
+        "detail": "not JSON",
+        "code": "FAIL_FORMAT"
+      }
+    ],
+    "codes": [
+      "FAIL_FORMAT",
+      "FAIL_SCHEMA"
+    ]
+  }
+}

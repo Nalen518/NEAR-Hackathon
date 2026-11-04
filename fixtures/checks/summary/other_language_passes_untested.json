@@ -1,0 +1,39 @@
+{
+  "brief": {
+    "jobType": "summary",
+    "params": {
+      "maxWords": 20,
+      "mustMention": [
+        "NEAR Intents",
+        "fees"
+      ],
+      "language": "fr",
+      "format": "paragraph"
+    },
+    "checklist": [
+      {
+        "id": "C1",
+        "kind": "code",
+        "rule": "language == fr"
+      },
+      {
+        "id": "M1",
+        "kind": "model",
+        "rule": "every claim is supported by the source"
+      }
+    ],
+    "deliverableFormat": "text/plain"
+  },
+  "source": "",
+  "delivery": "Un court résumé en français.",
+  "expected": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": true,
+        "detail": "fr"
+      }
+    ],
+    "codes": []
+  }
+}
