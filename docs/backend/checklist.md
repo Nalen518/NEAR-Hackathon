@@ -7,10 +7,10 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 
 **How "done" is checked:** every response is parsed with the web's schemas from `packages/shared` in `services/shark/test/contract.test.ts`, against a fake chain. Nothing has run on testnet yet.
 
-Last updated: 4 Nov 2026 (after `e224e9d`)
+Last updated: 4 Nov 2026 (after `99cb32a`)
 
 ## Resume here (next session)
-Start at "Next" item 6: `GET /v1/openapi.json`. Then 4b (our own x402 facilitator service), 7 (sandbox tests of the real wasm in Docker) and 8 (Rust port of the code checks). Tests at the last commit: Shark 89, agents 22, checks 12, shared 25, web 47, contract 68. Nothing is deployed and nothing is pushed.
+Next on the list: 4b (our own x402 facilitator service), 7 (sandbox tests of the real wasm in Docker) and 8 (Rust port of the code checks). Tests at the last commit: Shark 91, agents 22, checks 12, shared 25, web 47, contract 68. Nothing is deployed and nothing is pushed.
 
 ## A. Must (the web goes live on these)
 
@@ -65,7 +65,7 @@ Start at "Next" item 6: `GET /v1/openapi.json`. Then 4b (our own x402 facilitato
 | 4 | x402: the `PAYMENT-REQUIRED` header, `PAYMENT-SIGNATURE` flow with a facilitator client, contract `mark_paid_x402` and `return_x402` (balance checked in a callback) | ✅ `5a8ac61` |
 | 4b | Our own x402 facilitator service on `@x402/near` (`/verify`, `/settle`, `/supported`), fake signer in tests | ⬜ |
 | 5 | Event reader for B1 tx links, the payouts list and RETURNED quotes | ✅ `e224e9d` (incidents for late work and strikes still come from job state) |
-| 6 | `GET /v1/openapi.json` (FR-14) | ⬜ |
+| 6 | `GET /v1/openapi.json` (FR-14) | ✅ `99cb32a` OpenAPI 3.1 from the shared schemas; a test checks it lists exactly the served routes |
 | 7 | Sandbox tests of the real wasm in Docker (full job path) | ⬜ |
 | 8 | Rust port of the code checks, for Owl in the OutLayer TEE (NFR-02) | ⬜ |
 
