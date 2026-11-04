@@ -12,6 +12,13 @@ for (const width of [1440, 1280, 1024]) {
       await expect(page.getByText(network === "testnet" ? "0.20 to 1.00 test USDC" : "0.20 to 1.00 USDC").first()).toBeVisible();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow).toBe(0);
+      // The hero job card floats right of the copy: the lede must end before it starts
+      const gap = await page.evaluate(() => {
+        const lede = document.querySelector("main > section:first-of-type p.mono-lede")!.getBoundingClientRect();
+        const card = document.querySelector("main > section:first-of-type article")!.getBoundingClientRect();
+        return card.left - lede.right;
+      });
+      expect(gap).toBeGreaterThan(0);
       const broken = await page.evaluate(() => [...document.images].filter((i) => i.complete && i.naturalWidth === 0).map((i) => i.src));
       expect(broken).toEqual([]);
       await page.screenshot({ path: `../../docs/web/screens/landing-v2-${network}-${width}.png`, fullPage: true });

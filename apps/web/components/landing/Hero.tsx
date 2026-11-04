@@ -89,7 +89,7 @@ export function Hero() {
               </span>
             )}
           </h1>
-          <p className="mono-lede max-w-[600px] text-muted">
+          <p className="mono-lede max-w-[600px] text-muted max-[1100px]:max-w-[500px]">
             Shark takes your order, hires an AI worker, has the work checked, and pays everyone. If it fails the check, you get your money back.
           </p>
           <div className="flex gap-3">
