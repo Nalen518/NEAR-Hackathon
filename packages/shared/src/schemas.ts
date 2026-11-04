@@ -196,23 +196,29 @@ export const Quote402 = z.object({
 });
 export type Quote402 = z.infer<typeof Quote402>;
 
-/** Decoded `PAYMENT-REQUIRED` header (x402 v2). Only shown in the For agents snippet. */
+/** Decoded `PAYMENT-REQUIRED` header (x402 v2, API §1.2 method 3): `resource` is at the top, each `accepts[]` entry is a PaymentRequirements. */
+export const X402Requirement = z.object({
+  scheme: z.literal("exact"),
+  network: NearNetwork,
+  amount: BaseUnits,
+  asset: z.string(),
+  payTo: z.string(),
+  maxTimeoutSeconds: z.number().int(),
+  extra: z.object({ quoteId: QuoteId, briefHash: z.string() }),
+});
 export const X402PaymentRequired = z.object({
   x402Version: z.literal(2),
-  accepts: z.array(
-    z.object({
-      scheme: z.literal("exact"),
-      network: NearNetwork,
-      asset: z.string(),
-      amount: BaseUnits,
-      payTo: z.string(),
-      maxTimeoutSeconds: z.number().int(),
-      resource: z.string(),
-      description: z.string(),
-      extra: z.object({ quoteId: QuoteId, briefHash: z.string() }),
-    }),
-  ),
+  error: z.string().optional(),
+  resource: z.object({ url: z.string(), description: z.string().optional(), mimeType: z.string().optional() }),
+  accepts: z.array(X402Requirement).min(1),
 });
+export type X402PaymentRequired = z.infer<typeof X402PaymentRequired>;
+
+/** `details` of a `422 brief_infeasible` (API §0.2, C3): why, and ways to make it work with the new params and price of each. */
+export const InfeasibleFix = z.object({ label: z.string(), params: z.record(z.string(), z.unknown()), price: UsdcAmount });
+export type InfeasibleFix = z.infer<typeof InfeasibleFix>;
+export const InfeasibleDetails = z.object({ reason: z.string(), fixes: z.array(InfeasibleFix).optional() });
+export type InfeasibleDetails = z.infer<typeof InfeasibleDetails>;
 
 export const OrderAccepted = z.object({
   orderId: OrderId,

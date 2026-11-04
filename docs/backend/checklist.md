@@ -7,7 +7,7 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 
 **How "done" is checked:** every response is parsed with the web's schemas from `packages/shared` in `services/shark/test/contract.test.ts`, against a fake chain. Nothing has run on testnet yet.
 
-Last updated: 4 Nov 2026 (after `fe5070b`)
+Last updated: 4 Nov 2026 (after the schema and fixes commit)
 
 ## Resume here (next session)
 Every item in the "no wallet or AI needed" list is done. What is left needs your yes for signing, or the NEAR AI key: see "Later" below. Tests at the last commit: Shark 91, facilitator 11, agents 22, checks 33 (TypeScript) and the same 20 shared fixtures in Rust, shared 25, web 47, contract 68 unit tests plus 3 sandbox tests on the real wasm. Nothing is deployed and nothing is pushed.
@@ -46,12 +46,11 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 | --- | --- | --- | --- |
 | C1 Recent quotes with status | ✅ | `e224e9d` | Last 20 quotes: paid, returned (with the payment tx) or expired. `returnReason` is always null: the indexer gives no return value |
 | C2 Auctions and incidents logs | 🟡 | `fd56a27` | Auctions log done. Incidents from job state (complaints, impossible briefs); disputes, late work and strikes need the event reader |
-| C3 `details.fixes[]` on brief_infeasible | ✅ | `fd56a27` | `{label, params, price}`. The web still offers its own fixes until it reads these |
-
-## Open schema bug (reported, not changed)
-- `X402PaymentRequired` in `packages/shared` still has the v1 shape (`resource` and `description` inside each `accepts[]` entry). The header Shark sends follows x402 v2 and API §1.2 (`resource` at the top). Only the web's "For agents" snippet uses that schema, so nothing breaks, but a decoded real header won't parse with it.
+| C3 `details.fixes[]` on brief_infeasible | ✅ | `fd56a27` | `{label, params, price}`. The web now shows these with their prices (its own suggestions stay only as a fallback for an older Shark) |
 
 ## Schema bugs found and fixed
+- `X402PaymentRequired` had the x402 v1 shape. Now v2 (`resource` at the top, `accepts[]` are PaymentRequirements), with a new fixture; Shark's tests parse the header it really sends.
+- New shared `InfeasibleDetails` and `InfeasibleFix` schemas for `brief_infeasible`; Shark's tests parse what it really sends.
 - `OrderRequest.params` stripped thread params. Fixed with strict params schemas (`ca2bf11`).
 - `ERROR_CODES` had no `order_not_found`. Added (`ca2bf11`).
 

@@ -272,7 +272,17 @@ export function mockChainCall(signer: string, method: string, args: Record<strin
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
-const err = (status: number, error: ErrorCode, message: string, headers?: Record<string, string>) => json({ error, message, charged: false }, status, headers);
+const err = (status: number, error: ErrorCode, message: string, headers?: Record<string, string>, details?: Record<string, unknown>) =>
+  json({ error, message, charged: false, ...(details ? { details } : {}) }, status, headers);
+
+// What Shark sends with brief_infeasible (API §0.2, C3): the reason and each fix with its new price.
+const INFEASIBLE_DETAILS = {
+  reason: "max_words_vs_must_mention",
+  fixes: [
+    { label: "Raise the limit to 300 words", params: { maxWords: 300 }, price: "0.75" },
+    { label: "Keep 1 required point", params: { mustMention: ["NEAR Intents"] }, price: "0.60" },
+  ],
+};
 
 const contractFor = (n: Network) => (n === "testnet" ? "sharkco.testnet" : "sharkco.near");
 const usdcFor = (n: Network) => (n === "testnet" ? "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af" : "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1");
@@ -311,7 +321,7 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
       const body = JSON.parse(String(init?.body ?? "{}")) as { jobType: keyof typeof SAMPLE_PRICE; payer: string; payWith?: { asset: string }; refundTo?: string; referrer?: string };
       if (scenario === "quoting") await new Promise((r) => setTimeout(r, 6000));
       const e = ERRORS[scenario];
-      if (e) return err(e[0], e[1], e[2], e[3]);
+      if (e) return err(e[0], e[1], e[2], e[3], e[1] === "brief_infeasible" ? INFEASIBLE_DETAILS : undefined);
       if (body.payWith && network === "testnet") return err(422, "intents_unavailable", "Paying from another chain is mainnet only.");
       const now = Date.now();
       const quoteId = nextQuoteId();

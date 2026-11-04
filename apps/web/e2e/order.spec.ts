@@ -44,6 +44,14 @@ for (const [mock, title] of [
   });
 }
 
+test("infeasible offers Shark's own fixes, each with its price", async ({ page }) => {
+  await fill(page, "infeasible");
+  await getQuote(page);
+  await expect(page.getByRole("button", { name: /Raise the limit to 300 words\s*0\.75 test USDC/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Keep 1 required point\s*0\.60 test USDC/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit the order myself" })).toBeVisible();
+});
+
 test("413 is an inline source error", async ({ page }) => {
   await fill(page, "too_large");
   await getQuote(page);

@@ -72,6 +72,16 @@ export function toRequest(f: FormState): OrderRequest {
   };
 }
 
+/** A priced fix from Shark (`details.fixes[].params`, API §4.1 shapes) → the form fields it changes. */
+export function fromParams(p: Record<string, unknown>): Partial<FormState> {
+  const out: Partial<FormState> = {};
+  if (typeof p.maxWords === "number") out.maxWords = String(p.maxWords);
+  if (Array.isArray(p.mustMention)) out.mustMention = p.mustMention.map(String);
+  if (typeof p.posts === "number") out.posts = String(p.posts);
+  if (Array.isArray(p.mustInclude)) out.mustInclude = p.mustInclude.map(String);
+  return out;
+}
+
 export function canSubmit(f: FormState) {
   const hasSource = f.jobType === "thread" || (f.source === "url" ? !!f.url.trim() : f.source === "text" ? !!f.text.trim() : !!f.upload);
   return !!f.instructions.trim() && hasSource && !!f.payer.trim();

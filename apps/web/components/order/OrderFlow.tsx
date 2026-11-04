@@ -1,7 +1,7 @@
 "use client";
 // Order page (Figma Order v2.0 150:3999, states 150:4148, mainnet pay 150:4277), on the v1 Check a call layout:
 // numbered step cards on the left, a sticky receipt column on the right.
-import { ContractMismatchError, NetworkMismatchError, SharkApiError, type Order, type Quote402 } from "@shark/shared";
+import { ContractMismatchError, formatUsdc, InfeasibleDetails, NetworkMismatchError, SharkApiError, type Order, type Quote402 } from "@shark/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
@@ -13,7 +13,7 @@ import { useWallet } from "@/lib/wallet";
 import { Checklist, JOB_TYPE, txHref } from "../ui/agency";
 import { StateCard, SystemBanner, type BannerState } from "../ui/feedback";
 import { Button, Chip, cx, Mascot, ProofPill, SmartLink } from "../ui/primitives";
-import { canSubmit, EMPTY_FORM, OrderForm, toRequest, type FormState } from "./OrderForm";
+import { canSubmit, EMPTY_FORM, fromParams, OrderForm, toRequest, type FormState } from "./OrderForm";
 import { Receipt } from "./Receipt";
 import { SeaMist } from "../hero/SeaMist";
 import { Coin } from "../ui/motion";
@@ -419,6 +419,7 @@ function WhatHappened({ order, network }: { order: Order; network: "testnet" | "
 }
 
 function ErrorState({ api, form, onFix, onEdit }: { api: SharkApiError | null; form: FormState; onFix: (p: Partial<FormState>) => void; onEdit: () => void }) {
+  const { network } = useNetwork();
   if (!api || api.status !== 422 || api.body.error === "input_unreadable") {
     if (api?.body.error === "input_unreadable")
       return (
@@ -435,20 +436,30 @@ function ErrorState({ api, form, onFix, onEdit }: { api: SharkApiError | null; f
       </StateCard>
     );
   if (api.body.error === "brief_infeasible") {
-    // shortcut: the API gives no fix list (gap G21); we offer the fixes the SRD feasibility rule implies.
+    // Shark sends its fixes with the new price of each (API §0.2, gap G21). Without them (an older Shark), we offer
+    // the fixes the SRD feasibility rule implies, without a price.
+    const fixes = InfeasibleDetails.safeParse(api.body.details).data?.fixes ?? [];
     const n = form.mustMention.length;
     return (
       <StateCard title="Can’t be done as asked" chip="infeasible" money="not charged yet">
         <p className="body-small text-muted">{api.body.message} Pick a fix: Shark requotes.</p>
         <ul className="flex flex-col">
-          {form.jobType === "summary" && n > 0 && (
+          {fixes.map((f) => (
+            <li key={f.label} className="border-b border-line">
+              <button className="mono-data flex w-full justify-between gap-4 py-3 text-left text-ink hover:text-accent" onClick={() => onFix(fromParams(f.params))}>
+                <span>{f.label}</span>
+                <span className="text-muted">{formatUsdc(f.price, { network })}</span>
+              </button>
+            </li>
+          ))}
+          {!fixes.length && form.jobType === "summary" && n > 0 && (
             <li className="border-b border-line">
               <button className="mono-data flex w-full justify-between py-3 text-left text-ink hover:text-accent" onClick={() => onFix({ maxWords: String(Math.min(500, Math.max(10 * n, Number(form.maxWords) * 2 || 300))) })}>
                 Raise the limit to {Math.min(500, Math.max(10 * n, Number(form.maxWords) * 2 || 300))} words
               </button>
             </li>
           )}
-          {form.jobType === "summary" && n > 1 && (
+          {!fixes.length && form.jobType === "summary" && n > 1 && (
             <li className="border-b border-line">
               <button className="mono-data flex w-full justify-between py-3 text-left text-ink hover:text-accent" onClick={() => onFix({ mustMention: form.mustMention.slice(0, Math.ceil(n / 2)) })}>
                 Keep {Math.ceil(n / 2)} required points

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { ApiError, Company, Health, Order, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult, X402PaymentRequired } from "./schemas";
+import { ApiError, Company, Health, InfeasibleDetails, Order, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult, X402PaymentRequired } from "./schemas";
 
 const FIXTURES: Record<string, z.ZodType> = {
   "prices.json": Prices,
@@ -33,5 +33,16 @@ describe("fixtures match API-CONTRACT schemas", () => {
     expect(pub.view).toBe("public");
     for (const k of ["instructions", "input", "delivery"]) expect(pub).not.toHaveProperty(k);
     expect(pub.brief).not.toHaveProperty("params");
+  });
+
+  it("brief_infeasible details carry priced fixes (C3)", () => {
+    const d = InfeasibleDetails.parse((load("error-infeasible.json") as { details: unknown }).details);
+    expect(d.fixes?.map((f) => f.price)).toEqual(["0.75", "0.60"]);
+  });
+
+  it("the x402 header is the v2 shape: resource at the top, requirements in accepts", () => {
+    const h = X402PaymentRequired.parse(load("x402-payment-required.json"));
+    expect(h.resource.url).toMatch(/\/v1\/orders$/);
+    expect(h.accepts[0]).not.toHaveProperty("resource");
   });
 });

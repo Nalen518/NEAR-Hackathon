@@ -3,6 +3,10 @@
   "message": "150 words can't cover 9 required points. Reduce the points or raise the limit.",
   "charged": false,
   "details": {
-    "reason": "max_words_vs_must_mention"
+    "reason": "max_words_vs_must_mention",
+    "fixes": [
+      { "label": "Raise the limit to 300 words", "params": { "maxWords": 300, "mustMention": ["a", "b", "c", "d", "e", "f", "g", "h", "i"] }, "price": "0.75" },
+      { "label": "Keep 5 required points", "params": { "maxWords": 150, "mustMention": ["a", "b", "c", "d", "e"] }, "price": "0.60" }
+    ]
   }
 }

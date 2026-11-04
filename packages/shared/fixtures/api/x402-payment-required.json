@@ -1,15 +1,19 @@
 {
   "x402Version": 2,
+  "error": "PAYMENT-SIGNATURE header is required",
+  "resource": {
+    "url": "https://shark.example/v1/orders",
+    "description": "Shark & Co. summary job q_01JC8Z3R9X0V4G7K2M5N8P1Q3S",
+    "mimeType": "application/json"
+  },
   "accepts": [
     {
       "scheme": "exact",
       "network": "near:testnet",
-      "asset": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
       "amount": "600000",
+      "asset": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
       "payTo": "sharkco.testnet",
-      "maxTimeoutSeconds": 600,
-      "resource": "https://shark.example/v1/orders",
-      "description": "Shark & Co. summary job q_01JC8Z3R9X0V4G7K2M5N8P1Q3S",
+      "maxTimeoutSeconds": 120,
       "extra": {
         "quoteId": "q_01JC8Z3R9X0V4G7K2M5N8P1Q3S",
         "briefHash": "sha256:a91fSAMPLE"

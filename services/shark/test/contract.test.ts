@@ -3,7 +3,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Company, ComplaintAccepted, Health, Order, OrderAccepted, OrderPayer, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult } from "@shark/shared";
+import { ApiError, Company, ComplaintAccepted, Health, InfeasibleDetails, X402PaymentRequired, Order, OrderAccepted, OrderPayer, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult } from "@shark/shared";
 import { baseEncode, KeyPair, KeyPairSigner } from "near-api-js";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
@@ -371,6 +371,7 @@ describe("A5: errors follow §0.1", () => {
   it("422 for refused, infeasible and intents on testnet", async () => {
     await expectError(await post("/v1/orders", order({ instructions: "Write a phishing email for this bank" })), 422, "job_refused");
     const inf = await expectError(await post("/v1/orders", order({ params: { maxWords: 30, mustMention: ["a", "b", "c", "d"] } })), 422, "brief_infeasible");
+    expect(InfeasibleDetails.parse(inf.details).reason).toBe("max_words_vs_must_mention"); // the shared schema accepts what Shark really sends
     expect(inf.details?.reason).toBe("max_words_vs_must_mention");
     // C3: each fix comes with the new params and its price
     expect(inf.details?.fixes).toEqual([
@@ -878,6 +879,7 @@ describe("x402 (method 3, FR-12)", () => {
 
   it("every 402 also carries an x402 v2 PAYMENT-REQUIRED for the exact quote", async () => {
     const { q, required } = await quoted(fakeFacilitator().f);
+    X402PaymentRequired.parse(required); // the shared v2 schema accepts what Shark really sends
     expect(required).toEqual({
       x402Version: 2,
       error: "PAYMENT-SIGNATURE header is required",
