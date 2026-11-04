@@ -97,8 +97,8 @@ export function JobView({ orderId }: { orderId: string }) {
     queryKey: ["order", orderId, ...key],
     queryFn: () => client.order(orderId),
     retry: false,
-    // "Can't reach Shark": show it at once, then retry every 5 s. 60 s while Unresolved, stop when final.
-    refetchInterval: (q) => (q.state.error ? 5000 : q.state.data ? (FINAL.has(q.state.data.status) ? false : q.state.data.status === "unresolved" ? 60_000 : 5000) : false),
+    // "Can't reach Shark": show it at once, then retry every 10 s (Shark allows 30 requests a minute per IP). 60 s while Unresolved, stop when final.
+    refetchInterval: (q) => (q.state.error ? 10_000 : q.state.data ? (FINAL.has(q.state.data.status) ? false : q.state.data.status === "unresolved" ? 60_000 : 10_000) : false),
   });
 
   // Payer view: in memory only, never shared or persisted (D-166). Shark accepts each signature once (one time nonce),

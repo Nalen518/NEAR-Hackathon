@@ -75,14 +75,14 @@ export function OrderFlow() {
     queryKey: ["quote", quote?.quoteId, ...key],
     queryFn: () => client.quote(quote!.quoteId),
     enabled: phase.kind === "awaiting" || (!!quote?.intents && phase.kind === "quote"),
-    refetchInterval: (q) => (q.state.data?.status === "AWAITING_PAYMENT" || !q.state.data ? 3000 : false),
+    refetchInterval: (q) => (q.state.data?.status === "AWAITING_PAYMENT" || !q.state.data ? 5000 : false),
   });
   const orderId = quoteStatus.data?.status === "PAID" ? quoteStatus.data.orderId : null;
   const job = useQuery({
     queryKey: ["order", orderId, ...key],
     queryFn: () => client.order(orderId!),
     enabled: !!orderId,
-    refetchInterval: (q) => (q.state.data && FINAL.has(q.state.data.status) ? false : 3000),
+    refetchInterval: (q) => (q.state.data && FINAL.has(q.state.data.status) ? false : 5000),
   });
 
   // ---- errors → states (prompt §5 table). Every one says nothing was charged.
