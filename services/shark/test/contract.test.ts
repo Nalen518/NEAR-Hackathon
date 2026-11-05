@@ -1359,7 +1359,7 @@ describe("public reads under load (review 2, 3 and 4)", () => {
       const { method } = JSON.parse(String(init.body));
       return Response.json({ jsonrpc: "2.0", id: 1, result: method === "eth_getBalance" ? "0xb8a9a9ff3000" : "0x3b9aca00" });
     });
-    const chain = rpcChain({ rpcUrl: "http://rpc.invalid", contractId: "sharkco.testnet", usdcId: USDC, evmRpcUrl: "http://base.invalid", ravenEvmAddress: "0x0000000000000000000000000000000000000001" });
+    const chain = rpcChain({ rpcUrl: "http://rpc.invalid", contractId: "sharkco.testnet", usdcId: USDC, evmRpcUrl: "http://base.invalid", payoutEvmAddress: "0x0000000000000000000000000000000000000001" });
     expect(await chain.ravenGas()).toEqual({ balanceWei: "203038841057280", gasPriceWei: "1000000000" });
     expect(seen.every((s) => s instanceof AbortSignal)).toBe(true);
     expect(await rpcChain({ rpcUrl: "http://rpc.invalid", contractId: "x", usdcId: USDC }).ravenGas()).toBeNull();

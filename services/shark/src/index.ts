@@ -16,7 +16,7 @@ const chain = rpcChain({
   walletId: config.walletId ?? undefined,
   walletKey: config.walletKey ?? undefined,
   evmRpcUrl: config.evmRpcUrl ?? undefined,
-  ravenEvmAddress: config.ravenEvmAddress ?? undefined,
+  payoutEvmAddress: config.payoutEvmAddress ?? undefined,
 });
 const store = openStore(config.fileStorePath);
 const now = () => Math.floor(Date.now() / 1000);

@@ -35,9 +35,9 @@ export type Config = {
   /** Shark's USDC wallet for escrow and keepers (FR-34). shortcut: a testnet account key until the OutLayer wallet */
   walletId: string | null;
   walletKey: string | null;
-  /** Base Sepolia RPC and Raven's address on it; both null until the owner gives them */
+  /** Base Sepolia RPC (the public one by default on testnet) and the derived address that pays Raven's payout gas; the gauge needs both */
   evmRpcUrl: string | null;
-  ravenEvmAddress: string | null;
+  payoutEvmAddress: string | null;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -75,7 +75,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     ),
     walletId: env[`${NET}_SHARK_WALLET_ID`] || null,
     walletKey: env.SHARK_WALLET_KEY || null,
-    evmRpcUrl: env[`${NET}_EVM_RPC_URL`] || null,
-    ravenEvmAddress: env[`${NET}_RAVEN_EVM_ADDRESS`] || null,
+    evmRpcUrl: env[`${NET}_EVM_RPC_URL`] || (network === "testnet" ? "https://sepolia.base.org" : null),
+    payoutEvmAddress: env[`${NET}_PAYOUT_EVM_ADDRESS`] || null,
   };
 }
