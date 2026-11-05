@@ -61,6 +61,13 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 - Old nonces (over a day) are dropped when Shark starts, and the "first seen" notes for paid refunds, retried payouts and reinstated workers are forgotten. An escrow that has not shown up on chain after 2 minutes is sent again (the contract refuses a second one for an escrowed job). `wind_down` has its own wording in the incident text.
 - `DECISIONS.md` D-173 records the payer view signature reuse and the API URL being an origin.
 
+## Security audit fixes (ponytail audit, 5 Nov 2026)
+- A hash can no longer be a path: `blob()` and `putBlob()` take only letters and digits (a worker chooses the delivery and reasons hashes, and a registered agent can read `/v1/files/<hash>`; before this `sha256:../../.env` read Shark's env file).
+- Customer links: only global IPv6 (2000::/3, not 6to4 or Teredo), more IPv4 ranges refused (multicast and above, 198.18/15, 192.0.0/24), and only ports 80 and 443. The `[::ffff:7f00:1]` form used to get through.
+- Request bodies over 3 MB are refused with 413 before they are read.
+- Crab and Raven answer only calls that carry `SHARK_AGENT_TOKEN` (`X-Shark-Token`). `make-key.mjs NAME --token` makes it. Shark refuses to start with worker URLs and no token.
+- Still open from the audit (Should and Nice): hash strings are not validated in the contract (`deliver` and friends, free to change before the first deploy), the PDF page count is read after extraction, and the `elliptic` low vulnerability through `@x402/near`.
+
 ## Schema bugs found and fixed
 - `X402PaymentRequired` had the x402 v1 shape. Now v2 (`resource` at the top, `accepts[]` are PaymentRequirements), with a new fixture; Shark's tests parse the header it really sends.
 - New shared `InfeasibleDetails` and `InfeasibleFix` schemas for `brief_infeasible`; Shark's tests parse what it really sends.

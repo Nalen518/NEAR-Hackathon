@@ -32,6 +32,14 @@ node ../shark/scripts/make-key.mjs .env.raven RAVEN_KEY
 node ../shark/scripts/make-key.mjs .env.owl OWL_KEY
 ```
 
+Shark and the two workers also share one secret, `SHARK_AGENT_TOKEN`. Crab and Raven refuse every call that does not carry it, so only Shark can start their work. Make it once and copy the same value into the three env files by hand (never into chat or git):
+
+```bash
+node scripts/make-key.mjs .env SHARK_AGENT_TOKEN --token          # in services/shark
+```
+
+Then paste that value into `services/agents/.env.crab` and `.env.raven` as `SHARK_AGENT_TOKEN=`. Shark will not start with worker URLs set and no token, and a worker will not start without one. Owl has no web port and does not need it.
+
 Copy `contracts/deploy/accounts.example.json` to `contracts/deploy/accounts.local.json` (git-ignored) and fill in the account names and the five public keys plus `quotePublicKey` (the public half of `SHARK_QUOTE_KEY`).
 
 ## 2. The plan
