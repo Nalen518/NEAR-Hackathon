@@ -88,6 +88,15 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 | 7 | Sandbox tests of the real wasm (full job path), with a test USDC contract | ✅ `fe5070b` (run by `contracts/run-sandbox.sh` in Docker) |
 | 8 | Rust port of the code checks, for Owl in the OutLayer TEE (NFR-02) | ✅ `a87a732` (`owl/checks`, 20 shared fixtures in `fixtures/checks`) |
 
+## To remember: values the owner gives at the very end
+The owner will hand these over after the audit and the build are finished. None of them goes into git or chat.
+- **NEAR AI key** (`NEARAI_API_KEY`), already owned, for Crab, Raven and Owl (`services/agents/.env.*`), and the model names (`CRAB_MODEL`, `RAVEN_MODEL`, `OWL_MODEL`, `OWL_MODEL_SECONDARY`).
+- **`SHARK_AGENT_TOKEN`**: made once with `node scripts/make-key.mjs .env SHARK_AGENT_TOKEN --token` in `services/shark`, then copied by hand into `.env.crab` and `.env.raven`.
+- **The other keys**: `SHARK_QUOTE_KEY`, `SHARK_FN_KEY`, `SHARK_WALLET_KEY`, `CRAB_KEY`, `RAVEN_KEY`, `OWL_KEY` (made with `make-key.mjs`), and `contracts/deploy/accounts.local.json` with the public keys.
+- **Base Sepolia ETH** sent to the gas address `0x3A3Fa9e6Df65F800ea24a99ad9191fa18b611440` (about 0.005 ETH), and `TESTNET_PAYOUT_EVM_ADDRESS` set to it.
+- **Test USDC** from the Circle faucet for the owner and the buyer, then the signing steps of the deploy, each with the owner's yes.
+- **`WEB_ORIGINS`** with the deployed web address, the host (Railway or Fly) and the real wallet for the web (W6).
+
 ## Later: needs a wallet 🔒 or NEAR AI 🧠
 - 🔒 Testnet deploy: **runbook ready in `docs/backend/DEPLOY-TESTNET.md`** (helper scripts: `contracts/deploy/plan.mjs`, `services/shark/scripts/make-key.mjs` and `order.mjs`; none of them signs). Contract init (`new` now takes the Shark wallet account), fund the contract with a little NEAR, register workers and Owl, USDC storage registrations, reserve seed, agent keys, then A12.
 - 🔒 Run our facilitator (`services/facilitator`): create and fund the relayer account (`x402-relayer.sharkco.testnet`), set `X402_RELAYER_KEY` and `X402_API_KEY`, point Shark's `TESTNET_X402_FACILITATOR_URL` at it. Or use FastNEAR's (needs an API key, requested by a GitHub issue, reviewed by hand).
