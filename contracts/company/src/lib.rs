@@ -316,6 +316,15 @@ fn now_secs() -> u64 {
     env::block_timestamp_ms() / 1000
 }
 
+/// Shark keeps texts in files named by their hash, and workers and the reviewer choose some hashes (delivery, reasons).
+/// So a hash is `sha256:` and up to 64 letters or digits: no path, no dots, no slashes.
+fn check_hash(h: &str) {
+    require!(
+        h.strip_prefix("sha256:").is_some_and(|r| (1..=64).contains(&r.len()) && r.bytes().all(|b| b.is_ascii_alphanumeric())),
+        "E_BAD_HASH"
+    );
+}
+
 fn emit(event: &str, data: serde_json::Value) {
     env::log_str(&format!(
         "EVENT_JSON:{}",
@@ -490,6 +499,8 @@ impl Contract {
 
     pub fn award(&mut self, job: u64, worker: AccountId, fee: U128, bid_hash: String, reason_hash: String) {
         self.only(&self.shark.clone());
+        check_hash(&bid_hash);
+        check_hash(&reason_hash);
         let mut j = self.job(job);
         require!(j.state == JobState::Paid, "E_BAD_STATE");
         let w = self.workers.get(&worker).unwrap_or_else(|| env::panic_str("E_UNKNOWN_AGENT"));
@@ -510,6 +521,7 @@ impl Contract {
     }
 
     pub fn deliver(&mut self, job: u64, delivery_hash: String) {
+        check_hash(&delivery_hash);
         let mut j = self.job(job);
         require!(j.worker.as_ref() == Some(&env::predecessor_account_id()), "E_UNAUTHORIZED");
         require!(j.state == JobState::Awarded || j.state == JobState::Revision, "E_BAD_STATE");
@@ -527,6 +539,7 @@ impl Contract {
     pub fn on_review(&mut self, job: u64, result: ReviewResult) {
         let rv = self.reviewer.clone().unwrap_or_else(|| env::panic_str("E_UNKNOWN_AGENT"));
         require!(env::predecessor_account_id() == rv.id && !rv.suspended, "E_UNAUTHORIZED");
+        check_hash(&result.reasons_hash);
         let mut j = self.job(job);
         emit(
             "review_result",
@@ -615,6 +628,7 @@ impl Contract {
     /// Shark records a payer's complaint (the payer proved ownership with NEP-413 off chain, API §1.6).
     pub fn complain(&mut self, job: u64, reason_hash: String) {
         self.only(&self.shark.clone());
+        check_hash(&reason_hash);
         let mut j = self.job(job);
         require!(j.state == JobState::Delivered && j.complaint_hash.is_none(), "E_BAD_STATE");
         require!(j.complaint_until.is_some_and(|t| now_secs() <= t), "E_WINDOW_CLOSED");

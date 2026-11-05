@@ -191,7 +191,7 @@ fn award_over_the_worker_cap_fails() {
     let mut c = setup();
     pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
     ctx("shark.testnet", 1_010);
-    c.award(1, acc("crab.testnet"), U128(300_001), "h".into(), "h".into());
+    c.award(1, acc("crab.testnet"), U128(300_001), "sha256:h".into(), "sha256:h".into());
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn award_below_min_fee_fails() {
     let mut c = setup();
     pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
     ctx("shark.testnet", 1_010);
-    c.award(1, acc("crab.testnet"), U128(59_999), "h".into(), "h".into());
+    c.award(1, acc("crab.testnet"), U128(59_999), "sha256:h".into(), "sha256:h".into());
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn escrow_must_be_fee_plus_review_fee() {
     let mut c = setup();
     pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
     ctx("shark.testnet", 1_010);
-    c.award(1, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+    c.award(1, acc("crab.testnet"), U128(180_000), "sha256:h".into(), "sha256:h".into());
     ctx(usdc().as_str(), 1_011);
     let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(180_000), "escrow:1".into());
 }
@@ -271,7 +271,7 @@ fn three_upheld_complaints_cage_shark() {
         let id = (i + 1) as u64;
         assert_eq!(pay(&mut c, &quote(qid, 600_000, "buyer.testnet"), "buyer.testnet", 600_000), 0);
         ctx("shark.testnet", 1_010);
-        c.award(id, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+        c.award(id, acc("crab.testnet"), U128(180_000), "sha256:h".into(), "sha256:h".into());
         ctx(usdc().as_str(), 1_011);
         let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(230_000), format!("escrow:{id}"));
         ctx("crab.testnet", 1_100);
@@ -356,7 +356,7 @@ fn roles_view() {
 fn failed_job(c: &mut Contract, id: u64, qid: &str) {
     assert_eq!(pay(c, &quote(qid, 600_000, "buyer.testnet"), "buyer.testnet", 600_000), 0);
     ctx("shark.testnet", 1_010);
-    c.award(id, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+    c.award(id, acc("crab.testnet"), U128(180_000), "sha256:h".into(), "sha256:h".into());
     ctx(usdc().as_str(), 1_011);
     let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(230_000), format!("escrow:{id}"));
     ctx("crab.testnet", 1_100);
@@ -536,7 +536,7 @@ fn a_worker_at_the_unresolved_cap_cannot_win_an_award() {
     c.set_config(Config { max_unresolved_open: 1, ..config() });
     pay(&mut c, &quote("q_B", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
     ctx("shark.testnet", 3_010);
-    c.award(2, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+    c.award(2, acc("crab.testnet"), U128(180_000), "sha256:h".into(), "sha256:h".into());
 }
 
 #[test]
@@ -563,7 +563,7 @@ fn only_the_shark_wallet_can_escrow() {
     let mut c = setup();
     pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
     ctx("shark.testnet", 1_010);
-    c.award(1, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+    c.award(1, acc("crab.testnet"), U128(180_000), "sha256:h".into(), "sha256:h".into());
     ctx(usdc().as_str(), 1_011);
     let _ = c.ft_on_transfer(acc("shark.testnet"), U128(230_000), "escrow:1".into()); // the key account is not the wallet
 }
@@ -691,7 +691,7 @@ fn two_workers() -> Contract {
 
 fn awarded_to(c: &mut Contract, worker: &str, at: u64) {
     ctx("shark.testnet", at);
-    c.award(1, acc(worker), U128(180_000), "h".into(), "h".into());
+    c.award(1, acc(worker), U128(180_000), "sha256:h".into(), "sha256:h".into());
     ctx(usdc().as_str(), at + 1);
     let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(230_000), "escrow:1".into());
 }
@@ -727,7 +727,7 @@ fn the_late_worker_cannot_be_awarded_again() {
     ctx("anyone.testnet", 1_611);
     c.expire_work(1);
     ctx("shark.testnet", 1_700);
-    c.award(1, acc("crab.testnet"), U128(180_000), "h".into(), "h".into());
+    c.award(1, acc("crab.testnet"), U128(180_000), "sha256:h".into(), "sha256:h".into());
 }
 
 #[test]
@@ -974,4 +974,55 @@ fn owners_paid_counts_only_transfers_that_succeeded_and_the_config_change_time_i
     c.on_payout(0, acc("dao.testnet"), U128(1_000), "wind_down".into(), Ok(()));
     c.on_payout(1, acc("crab.testnet"), U128(180_000), "worker".into(), Ok(()));
     assert_eq!(c.get_stats().owners_paid.0, 195_000); // the wind-down sweep and worker pay don't count
+}
+
+#[test]
+#[should_panic(expected = "E_BAD_HASH")]
+fn deliver_refuses_a_hash_that_is_a_path() {
+    let mut c = setup();
+    pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    ctx("shark.testnet", 1_010);
+    c.award(1, acc("crab.testnet"), U128(180_000), "sha256:bid".into(), "sha256:why".into());
+    ctx(usdc().as_str(), 1_011);
+    let _ = c.ft_on_transfer(acc("wallet.testnet"), U128(230_000), "escrow:1".into());
+    ctx("crab.testnet", 1_100);
+    c.deliver(1, "sha256:../../.env".into());
+}
+
+#[test]
+#[should_panic(expected = "E_BAD_HASH")]
+fn review_refuses_a_reasons_hash_that_is_a_path() {
+    let mut c = setup();
+    delivered_job(&mut c);
+    ctx("owl.testnet", 1_200);
+    c.on_review(1, ReviewResult { mode: "primary".into(), pass: true, codes: vec![], reasons_hash: "sha256:../../.env".into() });
+}
+
+#[test]
+#[should_panic(expected = "E_BAD_HASH")]
+fn award_refuses_a_hash_without_the_prefix() {
+    let mut c = setup();
+    pay(&mut c, &quote("q_A", 600_000, "buyer.testnet"), "buyer.testnet", 600_000);
+    ctx("shark.testnet", 1_010);
+    c.award(1, acc("crab.testnet"), U128(180_000), "bid".into(), "sha256:why".into());
+}
+
+#[test]
+#[should_panic(expected = "E_BAD_HASH")]
+fn complain_refuses_a_hash_that_is_not_one() {
+    let mut c = setup();
+    let id = delivered_job(&mut c);
+    review(&mut c, id, "primary", true, &[], 1_200);
+    ctx("shark.testnet", 1_300);
+    c.complain(id, "../why".into());
+}
+
+#[test]
+fn hashes_of_the_right_shape_pass_and_others_do_not() {
+    for ok in ["sha256:d", "sha256:r", &format!("sha256:{}", "a".repeat(64)), "sha256:0A9z"] {
+        super::check_hash(ok);
+    }
+    for bad in ["", "sha256:", "d", "sha256:a.b", "sha256:a/b", "sha256:a b", "sha256:é", &format!("sha256:{}", "a".repeat(65)), "SHA256:abc"] {
+        assert!(std::panic::catch_unwind(|| super::check_hash(bad)).is_err(), "{bad:?} should be refused");
+    }
 }

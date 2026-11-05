@@ -164,7 +164,7 @@ fn signed(id: &str, price: u128) -> (Quote, String, String) {
 
 async fn award_and_deliver(n: &Net, job: u64) -> TestResult<()> {
     let none = NearToken::from_yoctonear(0);
-    n.call("shark", "company", "award", json!({ "job": job, "worker": "crab", "fee": "180000", "bid_hash": "h", "reason_hash": "h" }), none).await?;
+    n.call("shark", "company", "award", json!({ "job": job, "worker": "crab", "fee": "180000", "bid_hash": "sha256:h", "reason_hash": "sha256:h" }), none).await?;
     n.send("wallet", 230_000, &format!("escrow:{job}")).await?;
     n.call("crab", "company", "deliver", json!({ "job": job, "delivery_hash": "sha256:d" }), none).await
 }
