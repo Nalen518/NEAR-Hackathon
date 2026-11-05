@@ -1469,3 +1469,25 @@ describe("security audit: file hashes, links, body size, worker token", () => {
     expect(seen.at(-1)).toEqual({ url: "http://crab.local/award", token: "tok" });
   });
 });
+
+describe("PDF page limit is checked before any text is read (audit 6)", () => {
+  /** n pages that share one tiny content stream; no xref, pdf.js rebuilds it */
+  const manyPages = (n: number) => {
+    const stream = "BT /F1 12 Tf 10 10 Td (Hi) Tj ET";
+    const kids = Array.from({ length: n }, (_, i) => `${10 + i} 0 R`).join(" ");
+    const pages = Array.from({ length: n }, (_, i) => `${10 + i} 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 100 50]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n`).join("");
+    return new TextEncoder().encode(`%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[${kids}]/Count ${n}>>endobj\n${pages}4 0 obj<</Length ${stream.length}>>stream\n${stream}\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n`);
+  };
+  it("21 pages are refused with 413, 20 pages are read", async () => {
+    const send = (bytes: Uint8Array) => {
+      const form = new FormData();
+      form.append("file", new File([bytes as BlobPart], "a.pdf", { type: "application/pdf" }));
+      return app.request("/v1/uploads", { method: "POST", body: form });
+    };
+    const big = await send(manyPages(21));
+    expect(big.status).toBe(413);
+    expect((await parsed(ApiError, big)).error).toBe("input_too_large");
+    const ok = await parsed(UploadResult, await send(manyPages(20)));
+    expect(ok.pages).toBe(20);
+  });
+});

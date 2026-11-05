@@ -41,13 +41,20 @@ export function htmlToText(html: string): string {
 }
 
 export async function pdfToSnapshot(bytes: Uint8Array): Promise<Snapshot> {
-  let res: { totalPages: number; text: string };
+  let doc: Awaited<ReturnType<typeof getDocumentProxy>>;
   try {
-    res = await extractText(await getDocumentProxy(bytes), { mergePages: true });
+    doc = await getDocumentProxy(bytes);
   } catch {
     throw unreadable("the PDF could not be opened");
   }
-  if (res.totalPages > MAX_PAGES) throw tooLarge(`${res.totalPages} pages`);
+  // the page count is known once the file is open, so a 2 MB file of thousands of tiny pages is refused before any text is read
+  if (doc.numPages > MAX_PAGES) throw tooLarge(`${doc.numPages} pages`);
+  let res: { totalPages: number; text: string };
+  try {
+    res = await extractText(doc, { mergePages: true });
+  } catch {
+    throw unreadable("the PDF could not be opened");
+  }
   if (!res.text.trim()) throw unreadable("the PDF has no text layer");
   return snapshotText(res.text, res.totalPages);
 }
