@@ -36,7 +36,7 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 | B1 Timeline events with tx links | ✅ | `e224e9d` | Every step links its tx; adds worker_paid, reviewer_paid, refunded, finalized, complaint. Built from the indexer's receipts: untested against real testnet data |
 | B2 Per-check review results | ✅ | `cb15147` | Code checks with detail, model checks pass only, Owl's reasons |
 | B3 Exact rule strings | ✅ | `f523c10` | The web's list in `apps/web/lib/checklist.ts` is now the real one |
-| B4 Company core (P6) | ✅ | `e224e9d` and the next commit | Live: strikes, reserve, P&L (owners paid is the last 7 days, from a new contract counter), workers, reviewer, ledger (with worker payout txs), config (with the change time and tx), payouts (from the reader, owners' payouts not listed), Raven's Base gas (needs `TESTNET_EVM_RPC_URL` and `TESTNET_RAVEN_EVM_ADDRESS`, a placeholder until the owner gives them). Sample by decision: DAO proposals (no DAO yet) |
+| B4 Company core (P6) | ✅ | `e224e9d` and the next commit | Live: strikes, reserve, P&L (owners paid is the last 7 days, from a new contract counter), workers, reviewer, ledger (with worker payout txs), config (with the change time and tx), payouts (from the reader, owners' payouts not listed), Raven's Base gas (needs `TESTNET_PAYOUT_EVM_ADDRESS`, the address that pays the gas; the RPC defaults to `https://sepolia.base.org`; a placeholder until the address is set). Sample by decision: DAO proposals (no DAO yet) |
 | B5 `money` on orders | ✅ | `f523c10` | Same split as the contract's `finalize` |
 | B6 `404 order_not_found` | ✅ | `ca2bf11` | Schema fixed too |
 
@@ -57,6 +57,7 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 - A suspended worker with no `suspend` call keeps the time Shark first saw it.
 - Payer view: the same signature may be sent again for the same account and order until it is 5 minutes old (owner decision). A complaint signature still works once. `API-CONTRACT.md` line 253 says so. See `DECISIONS.md` D-173.
 - Runbook: a changed contract needs a fresh account, the web API URL is the origin only, and the proxy must add the client address.
+- Raven gas gauge: `TESTNET_PAYOUT_EVM_ADDRESS` (renamed from `RAVEN_EVM_ADDRESS`, which the API contract uses for Raven's receive address) is the address Chain Signatures gives the contract for the path `base-payouts`. `services/shark/scripts/derive-address.mjs` works it out and checks it against the MPC contract's own `derived_public_key` (for `sharkco.testnet`: `0x3A3Fa9e6Df65F800ea24a99ad9191fa18b611440`, not funded yet). The Base Sepolia RPC defaults to `https://sepolia.base.org`.
 - Old nonces (over a day) are dropped when Shark starts, and the "first seen" notes for paid refunds, retried payouts and reinstated workers are forgotten. An escrow that has not shown up on chain after 2 minutes is sent again (the contract refuses a second one for an escrowed job). `wind_down` has its own wording in the incident text.
 - `DECISIONS.md` D-173 records the payer view signature reuse and the API URL being an origin.
 

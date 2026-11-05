@@ -435,6 +435,7 @@ Every on-chain value the code uses comes from this table through env vars (`<NET
 | USDC on Base (Circle) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | `<NET>_EVM_USDC` | Circle docs **[VERIFY O-24]** |
 | Base explorer | `https://sepolia.basescan.org` | `https://basescan.org` | `<NET>_EVM_EXPLORER_URL` | [VERIFIED] |
 | Raven's receive address | Base Sepolia address | Base address (different key) | `<NET>_RAVEN_EVM_ADDRESS` | Phase 0 |
+| Payout gas address (the company contract's Chain Signatures address, path `base-payouts`; Shark reads its ETH balance for the gas gauge) | Base Sepolia address | Base address | `<NET>_PAYOUT_EVM_ADDRESS` (RPC: `<NET>_EVM_RPC_URL`, testnet default `https://sepolia.base.org`) | after the contract is deployed |
 | Gas for Raven payouts | Base Sepolia ETH faucet → derived address | Real ETH on Base (~USD 5) | — | — |
 | Owners' DAO | Sputnik `*.sputnikv2.testnet` (Trezu if it supports testnet, else Sputnik CLI) | Sputnik `*.sputnik-dao.near` via Trezu | `<NET>_DAO_ID` | **[VERIFY O-09]** |
 | NEAR AI Cloud | `https://cloud-api.near.ai/v1` — same service, **real money** | same | `NEARAI_API_KEY` | [VERIFIED] |

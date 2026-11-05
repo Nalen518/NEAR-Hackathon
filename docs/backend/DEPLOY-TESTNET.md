@@ -80,7 +80,7 @@ Expect: the right owner, guardian, Shark, wallet and USDC in `get_roles`; `reser
 | `WEB_ORIGINS` | `http://localhost:3100` plus the deployed web origin, comma separated |
 | `CACHE_SECS` | optional, default 10: how long `/v1/company`, `/v1/prices` and `/v1/health` are kept in memory |
 | `PUBLIC_BASE_URL` | where agents reach this Shark |
-| `TESTNET_EVM_RPC_URL`, `TESTNET_RAVEN_EVM_ADDRESS` | optional: the gas gauge on the company page. Placeholder until set |
+| `TESTNET_PAYOUT_EVM_ADDRESS` | optional: the address that pays Raven's payout gas, for the gauge on the company page (placeholder until set). `TESTNET_EVM_RPC_URL` defaults to `https://sepolia.base.org` |
 
 The three secrets are already in the file from step 1.
 
@@ -90,6 +90,16 @@ curl http://localhost:8787/v1/health
 ```
 
 `health` should answer `ok`. If the contract is paused, caged or closed it says so.
+
+### Raven's payout gas address (optional, read only)
+
+Raven is paid on Base Sepolia, and the ETH for that gas comes from an address the company contract gets from Chain Signatures (the contract account plus the path `base-payouts`). It does not exist on chain until you send it ETH, but it can be worked out now:
+
+```bash
+node services/shark/scripts/derive-address.mjs <contract account> base-payouts --check
+```
+
+It asks `v1.signer-prod.testnet` for its root key, derives the address, and with `--check` refuses to print it unless the contract's own `derived_public_key` gives the same key. For `sharkco.testnet` the result is `0x3A3Fa9e6Df65F800ea24a99ad9191fa18b611440`. Put it in `TESTNET_PAYOUT_EVM_ADDRESS`, and send it a little Base Sepolia ETH from a faucet (about 0.005 ETH covers hundreds of payouts). A different contract account or path gives a different address, and the Raven payout code that comes later must use the same two strings. Raven's own Base address (where it receives USDC, `TESTNET_RAVEN_EVM_ADDRESS` in the API contract) is a different thing and comes with Raven's setup.
 
 ## 5. First order, paid by hand
 
