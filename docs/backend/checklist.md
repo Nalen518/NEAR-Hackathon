@@ -68,7 +68,6 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 - Crab and Raven answer only calls that carry `SHARK_AGENT_TOKEN` (`X-Shark-Token`). `make-key.mjs NAME --token` makes it. Shark refuses to start with worker URLs and no token.
 - The contract checks every hash it stores (`deliver`, `on_review` reasons, `complain`, `award`): `sha256:` and 1 to 64 letters or digits, else `E_BAD_HASH`. Done before the first deploy, so no migration. The 74 unit tests and the 3 sandbox tests on the real wasm pass with it.
 - A PDF's page count is read as soon as the file opens, so more than 20 pages is refused before any text is extracted.
-- Accepted, not fixed: `pnpm audit` shows 1 low result, `elliptic <= 6.6.1` ("risky implementation" of a cryptographic primitive) through `@x402/near` in the facilitator. The fixed version 6.6.2 is not on npm yet (6.6.1 is the newest, checked 5 Nov 2026). We sign with ed25519 only, and the weak part is secp256k1 signing. **Recheck** with `pnpm audit --prod` before the final deploy and add an override once 6.6.2 exists.
 
 ## Schema bugs found and fixed
 - `X402PaymentRequired` had the x402 v1 shape. Now v2 (`resource` at the top, `accepts[]` are PaymentRequirements), with a new fixture; Shark's tests parse the header it really sends.
