@@ -10,7 +10,7 @@ Items come from `docs/web/BACKEND-TODO.md` (A Must, B Should, C Could) and the S
 Last updated: 4 Nov 2026 (after the review fixes)
 
 ## Resume here (next session)
-Every item in the "no wallet or AI needed" list is done. What is left needs your yes for signing, or the NEAR AI key: see "Later" below. Tests at the last commit: Shark 107, facilitator 11, agents 22, checks 33 (TypeScript) and the same 20 shared fixtures in Rust, shared 25, web 47, contract 68 unit tests plus 3 sandbox tests on the real wasm. Nothing is deployed. `development` is pushed to GitHub.
+Every item in the "no wallet or AI needed" list is done. What is left needs your yes for signing, or the NEAR AI key: see "Later" below. Tests at the last commit: Shark 118, facilitator 11, agents 24, checks 33 (TypeScript) and the same 20 shared fixtures in Rust, shared 25, web 47, contract 74 unit tests plus 3 sandbox tests on the real wasm. Nothing is deployed.
 
 ## A. Must (the web goes live on these)
 
@@ -66,7 +66,9 @@ Every item in the "no wallet or AI needed" list is done. What is left needs your
 - Customer links: only global IPv6 (2000::/3, not 6to4 or Teredo), more IPv4 ranges refused (multicast and above, 198.18/15, 192.0.0/24), and only ports 80 and 443. The `[::ffff:7f00:1]` form used to get through.
 - Request bodies over 3 MB are refused with 413 before they are read.
 - Crab and Raven answer only calls that carry `SHARK_AGENT_TOKEN` (`X-Shark-Token`). `make-key.mjs NAME --token` makes it. Shark refuses to start with worker URLs and no token.
-- Still open from the audit (Should and Nice): hash strings are not validated in the contract (`deliver` and friends, free to change before the first deploy), the PDF page count is read after extraction, and the `elliptic` low vulnerability through `@x402/near`.
+- The contract checks every hash it stores (`deliver`, `on_review` reasons, `complain`, `award`): `sha256:` and 1 to 64 letters or digits, else `E_BAD_HASH`. Done before the first deploy, so no migration. The 74 unit tests and the 3 sandbox tests on the real wasm pass with it.
+- A PDF's page count is read as soon as the file opens, so more than 20 pages is refused before any text is extracted.
+- Accepted, not fixed: `pnpm audit` shows 1 low result, `elliptic <= 6.6.1` ("risky implementation" of a cryptographic primitive) through `@x402/near` in the facilitator. The fixed version 6.6.2 is not on npm yet (6.6.1 is the newest, checked 5 Nov 2026). We sign with ed25519 only, and the weak part is secp256k1 signing. **Recheck** with `pnpm audit --prod` before the final deploy and add an override once 6.6.2 exists.
 
 ## Schema bugs found and fixed
 - `X402PaymentRequired` had the x402 v1 shape. Now v2 (`resource` at the top, `accepts[]` are PaymentRequirements), with a new fixture; Shark's tests parse the header it really sends.
