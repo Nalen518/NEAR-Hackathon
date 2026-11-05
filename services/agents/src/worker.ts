@@ -2,7 +2,7 @@
 // with its own model, stores the delivery with Shark and calls `deliver` on chain.
 import { runCodeChecks } from "@shark/checks";
 import { fromBase, toBase, type Brief } from "@shark/shared";
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { baseEncode, KeyPair, type KeyPairString } from "near-api-js";
 import { stripFence, type AgentChain, type Files, type Model } from "./near";
@@ -11,6 +11,8 @@ export type WorkerDeps = {
   name: "crab" | "raven";
   accountId: string;
   key: string;
+  /** Shark's shared secret (SHARK_AGENT_TOKEN): every call without it is refused */
+  sharkToken: string;
   chain: AgentChain;
   files: Files;
   model: Model;
@@ -40,6 +42,15 @@ export function createWorkerApp(d: WorkerDeps) {
   const working = new Set<string>();
 
   app.get("/health", (c) => c.json({ ok: true, agent: d.name, types: ["extract", "summary", "thread"], model: "nearai" }));
+
+  // Only Shark may ask for bids, award work or open a dispute window: each one costs model calls and chain reads.
+  const digest = (s: string) => createHash("sha256").update(s).digest();
+  const expected = digest(d.sharkToken);
+  app.use("*", async (c, next) => {
+    if (c.req.path === "/health") return next();
+    if (!d.sharkToken || !timingSafeEqual(digest(c.req.header("X-Shark-Token") ?? ""), expected)) return c.json({ error: "unauthorized" }, 401);
+    return next();
+  });
 
   app.post("/rfq", async (c) => {
     const rfq = (await c.req.json()) as Rfq;

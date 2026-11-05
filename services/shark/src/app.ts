@@ -1,6 +1,7 @@
 // Shark HTTP API `/v1/*` (API-CONTRACT v2.3 §1). Every response states this host's network (§0.3 N1).
 import type { PaymentOptions } from "@shark/shared";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { agentRoutes } from "./agents";
 import type { Chain } from "./chain";
@@ -45,6 +46,10 @@ export function createApp({ config, chain, store, now = () => Math.floor(Date.no
     if (n > config.rateLimitPerMin) throw new HttpError(429, "rate_limited", "Too many requests. Wait a minute and try again.", undefined, 60 - (now() % 60));
     return next();
   });
+
+  // The biggest legitimate body is a 2 MB upload plus form overhead. Without this a single huge POST fills the memory
+  // before any size or login check runs.
+  app.use("/v1/*", bodyLimit({ maxSize: 3 * 1024 * 1024, onError: (c) => sendError(c, new HttpError(413, "input_too_large", "The request is over 3 MB. Nothing was charged.")) }));
 
   app.onError((err, c) => {
     if (err instanceof HttpError) return sendError(c, err);

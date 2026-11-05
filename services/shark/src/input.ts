@@ -63,19 +63,25 @@ export async function fileToSnapshot(bytes: Uint8Array, name: string, type: stri
   throw unreadable("only PDF, HTML, TXT and MD files are accepted");
 }
 
+/** Public means: not private, loopback, link local, shared, multicast or reserved. For IPv6 only global addresses (2000::/3) pass,
+ * minus 6to4 (2002::) and Teredo (2001:0::), which carry an IPv4 address inside, and every ::ffff: form is refused. */
 function isPrivate(ip: string): boolean {
   if (isIP(ip) === 6) {
     const v = ip.toLowerCase();
-    if (v.startsWith("::ffff:")) return isPrivate(v.slice(7));
-    return v === "::1" || v === "::" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80");
+    return !/^[23]/.test(v) || v.startsWith("2002:") || v.startsWith("2001:0:") || v.startsWith("2001::");
   }
-  const [a, b] = ip.split(".").map(Number);
-  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  const [a, b, c] = ip.split(".").map(Number);
+  return (
+    a === 10 || a === 127 || a === 0 || a >= 224 ||
+    (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19)) || (a === 192 && b === 0 && c === 0)
+  );
 }
 
 /** Customer URLs are untrusted: http(s) only, public addresses only, checked again on every redirect. */
 async function assertPublic(url: URL) {
   if (url.protocol !== "https:" && url.protocol !== "http:") throw unreadable("only http and https links work");
+  if (url.port && url.port !== "80" && url.port !== "443") throw unreadable("only links on the normal web ports 80 and 443 work");
   const host = url.hostname.replace(/^\[|\]$/g, "");
   const ips = isIP(host) ? [host] : (await lookup(host, { all: true }).catch(() => { throw unreadable("the site can't be found"); })).map((r) => r.address);
   if (ips.some(isPrivate)) throw unreadable("the link points to a private address");

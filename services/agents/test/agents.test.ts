@@ -15,6 +15,8 @@ import { judgeComplaint, plainCopy, review, reviewOnce } from "../src/owl";
 import { bidDigest, createWorkerApp, decideDispute, work } from "../src/worker";
 
 const NOW = 1_793_500_000;
+const TOKEN = "test-shark-token";
+const fromShark = { "X-Shark-Token": TOKEN };
 const crabKey = KeyPair.fromRandom("ed25519");
 const owlKey = KeyPair.fromRandom("ed25519");
 
@@ -101,9 +103,9 @@ describe("formats match Shark exactly", () => {
 });
 
 describe("worker: bids (API 2.1)", () => {
-  const worker = () => createWorkerApp({ name: "crab", accountId: "crab-worker.testnet", key: crabKey.toString(), chain: chain(), files: files(), model: async () => "", perPage: 2_000n, etaSecs: 70, now: () => NOW, log: () => {} });
+  const worker = () => createWorkerApp({ name: "crab", accountId: "crab-worker.testnet", key: crabKey.toString(), sharkToken: TOKEN, chain: chain(), files: files(), model: async () => "", perPage: 2_000n, etaSecs: 70, now: () => NOW, log: () => {} });
   const rfq = (over: Record<string, unknown> = {}) =>
-    worker().request("/rfq", { method: "POST", body: JSON.stringify({ jobId: "j_000001", jobType: "summary", size: { pages: 6, words: 3000 }, cap: "0.30", ...over }) });
+    worker().request("/rfq", { method: "POST", headers: fromShark, body: JSON.stringify({ jobId: "j_000001", jobType: "summary", size: { pages: 6, words: 3000 }, cap: "0.30", ...over }) });
   it("bids min fee plus a per page amount, signed so Shark's check passes", async () => {
     const b = await (await rfq()).json();
     expect(b).toMatchObject({ workerId: "crab-worker.testnet", jobId: "j_000001", price: "0.072", etaSecs: 70 });
@@ -117,7 +119,7 @@ describe("worker: bids (API 2.1)", () => {
 });
 
 describe("worker: work (API 2.2)", () => {
-  const deps = (model: (s: string, u: string) => Promise<string>) => ({ name: "crab" as const, accountId: "crab-worker.testnet", key: crabKey.toString(), chain: chain(), files: files(), model, perPage: 2_000n, etaSecs: 70, log: () => {} });
+  const deps = (model: (s: string, u: string) => Promise<string>) => ({ name: "crab" as const, accountId: "crab-worker.testnet", key: crabKey.toString(), sharkToken: TOKEN, chain: chain(), files: files(), model, perPage: 2_000n, etaSecs: 70, log: () => {} });
   it("does the job, stores the delivery and delivers its hash on chain", async () => {
     job();
     const model = vi.fn(async () => GOOD);
@@ -218,7 +220,7 @@ describe("files client against the real Shark app", () => {
 });
 
 describe("worker: disputes (API 2.3, FR-45)", () => {
-  const deps = () => ({ name: "crab" as const, accountId: "crab-worker.testnet", key: crabKey.toString(), chain: chain(), files: files(), model: async () => "", perPage: 2_000n, etaSecs: 70, now: () => NOW, log: () => {} });
+  const deps = () => ({ name: "crab" as const, accountId: "crab-worker.testnet", key: crabKey.toString(), sharkToken: TOKEN, chain: chain(), files: files(), model: async () => "", perPage: 2_000n, etaSecs: 70, now: () => NOW, log: () => {} });
   const window = { jobId: "j_000001", codes: ["FAIL_FAITHFULNESS"], reasons: "A claim is not in the source.", until: new Date((NOW + 3_000) * 1000).toISOString() };
   const failed = (delivery: string) => job({ state: "failed", delivery_hash: put(delivery), codes: ["FAIL_FAITHFULNESS"] });
 
@@ -243,7 +245,7 @@ describe("worker: disputes (API 2.3, FR-45)", () => {
   });
   it("the HTTP route answers with the decision", async () => {
     failed(GOOD);
-    const res = await createWorkerApp(deps()).request("/dispute-window", { method: "POST", body: JSON.stringify(window) });
+    const res = await createWorkerApp(deps()).request("/dispute-window", { method: "POST", headers: fromShark, body: JSON.stringify(window) });
     expect(await res.json()).toEqual({ accepted: true, disputed: true });
   });
 });
@@ -265,5 +267,22 @@ describe("owl: second review (D-114, FR-45, FR-46)", () => {
     job({ id: 3, state: "failed", delivery_hash: put(GOOD) });
     await reviewOnce({ chain: chain(), files: files(), model: async () => answer, log: () => {} });
     expect(reviewed.map((r) => [r.job, r.result.mode])).toEqual([[1, "secondary"], [2, "secondary"]]);
+  });
+});
+
+describe("only Shark may call a worker (audit 4)", () => {
+  const app = () => createWorkerApp({ name: "crab", accountId: "crab-worker.testnet", key: crabKey.toString(), sharkToken: TOKEN, chain: {} as AgentChain, files: {} as Files, model: async () => "", perPage: 2_000n, etaSecs: 70, now: () => NOW, log: () => {} });
+  it("refuses /rfq, /award and /dispute-window without the token or with a wrong one, and keeps /health open", async () => {
+    for (const path of ["/rfq", "/award", "/dispute-window"]) {
+      for (const headers of [{} as Record<string, string>, { "X-Shark-Token": "wrong" }, { "X-Shark-Token": TOKEN + "x" }, { "X-Shark-Token": "" }]) {
+        const res = await app().request(path, { method: "POST", headers, body: "{}" });
+        expect(res.status).toBe(401);
+      }
+    }
+    expect((await app().request("/health")).status).toBe(200);
+  });
+  it("an empty configured token refuses everything", async () => {
+    const open = createWorkerApp({ name: "crab", accountId: "crab-worker.testnet", key: crabKey.toString(), sharkToken: "", chain: {} as AgentChain, files: {} as Files, model: async () => "", perPage: 2_000n, etaSecs: 70, now: () => NOW, log: () => {} });
+    expect((await open.request("/rfq", { method: "POST", headers: { "X-Shark-Token": "" }, body: "{}" })).status).toBe(401);
   });
 });

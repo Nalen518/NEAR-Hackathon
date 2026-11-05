@@ -33,7 +33,7 @@ if (role === "owl") {
   void pass();
 } else {
   // SRD §1.3: Crab is the cheaper, slower one; Raven charges a little more per page and is faster
-  const app = createWorkerApp({ name: role, accountId, key, chain, files, model, perPage: role === "crab" ? 2_000n : 4_000n, etaSecs: role === "crab" ? 70 : 45 });
+  const app = createWorkerApp({ name: role, accountId, key, sharkToken: need("SHARK_AGENT_TOKEN"), chain, files, model, perPage: role === "crab" ? 2_000n : 4_000n, etaSecs: role === "crab" ? 70 : 45 });
   const port = Number(env.PORT ?? (role === "crab" ? 8788 : 8789));
   serve({ fetch: app.fetch, port }, () => console.log(JSON.stringify({ agent: role, msg: "listening", port })));
 }

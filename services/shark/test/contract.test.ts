@@ -1,6 +1,6 @@
 // Contract test: every real response must parse with the web's schemas (packages/shared). A failure is a
 // contract bug in Shark, never a reason to loosen the schema. Chain is faked; signatures and NEP-413 are real.
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiError, Company, ComplaintAccepted, Health, InfeasibleDetails, X402PaymentRequired, Order, OrderAccepted, OrderPayer, PaymentOptions, Prices, Quote402, QuoteStatus, UploadResult } from "@shark/shared";
@@ -11,6 +11,7 @@ import { createApp } from "../src/app";
 import { rpcChain, verifyNep413, type Chain, type ContractConfig, type ContractJob, type Nep413 } from "../src/chain";
 import { loadConfig } from "../src/config";
 import { agentMessage } from "../src/agents";
+import { fetchSnapshot } from "../src/input";
 import { bidDigest, tick } from "../src/loop";
 import { openStore } from "../src/store";
 import type { Facilitator } from "../src/x402";
@@ -1417,5 +1418,54 @@ describe("housekeeping and a lost escrow (review 10 and 12)", () => {
     const again = openStore(dir);
     expect(again.useNonce("old", Math.floor(Date.now() / 1000), "view:a:j_000001", false)).toBe(true); // gone, so usable again
     expect(again.useNonce("fresh", Math.floor(Date.now() / 1000), "view:a:j_000001", false)).toBe(false); // still known
+  });
+});
+
+describe("security audit: file hashes, links, body size, worker token", () => {
+  it("1: a hash cannot reach a file outside files/ (a worker chooses delivery and reasons hashes)", () => {
+    const root = mkdtempSync(join(tmpdir(), "shark-trav-"));
+    mkdirSync(join(root, "data"));
+    writeFileSync(join(root, ".env"), "SHARK_WALLET_KEY=ed25519:SECRET");
+    const st = openStore(join(root, "data"));
+    for (const bad of ["../.env", "sha256:../../.env", "sha256:..\..\.env", "a/b", "sha256:", "", "sha256:ab.cd"]) {
+      expect(st.blob(bad)).toBeNull();
+      expect(() => st.putBlob(bad, "x")).toThrow();
+    }
+    st.putBlob("sha256:abc123", "fine");
+    expect(st.blob("sha256:abc123")).toBe("fine");
+  });
+
+  it("2: links to private, mapped, reserved and odd port addresses are refused before any request", async () => {
+    const blocked = ["http://127.0.0.1/", "http://0x7f.1/", "http://[::1]/", "http://[::ffff:7f00:1]/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:a9fe:a9fe]/latest/meta-data/", "http://[64:ff9b::7f00:1]/", "http://[fec0::1]/", "http://[2002:7f00:1::1]/", "http://224.0.0.1/", "http://198.18.0.1/", "http://169.254.169.254/", "http://10.0.0.5/", "http://93.184.216.34:8080/", "https://93.184.216.34:22/"];
+    for (const url of blocked) {
+      let sent = false;
+      const f = (async () => ((sent = true), new Response("secret", { headers: { "content-type": "text/plain" } }))) as unknown as typeof fetch;
+      await expect(fetchSnapshot(url, f), url).rejects.toMatchObject({ status: 422, code: "input_unreadable" });
+      expect(sent, url).toBe(false);
+    }
+    const ok = (async () => new Response("An article about NEAR.", { headers: { "content-type": "text/plain" } })) as unknown as typeof fetch;
+    for (const url of ["http://93.184.216.34/", "https://93.184.216.34:443/", "http://[2606:4700:4700::1111]/"]) expect((await fetchSnapshot(url, ok)).words).toBe(4);
+  });
+
+  it("3: a body over 3 MB is refused with 413 before it is read", async () => {
+    const res = await app.request("/v1/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: "x".repeat(3 * 1024 * 1024 + 1) });
+    expect(res.status).toBe(413);
+    expect((await parsed(ApiError, res)).error).toBe("input_too_large");
+    expect((await post("/v1/orders", order())).status).toBe(402); // a normal order still works
+  });
+
+  it("4: Shark sends its token to the workers on every call", async () => {
+    job(1, unawarded);
+    const seen: { url: string; token: string | null }[] = [];
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      seen.push({ url: String(url), token: new Headers(init?.headers).get("X-Shark-Token") });
+      return workersFetch({ "http://crab.local": crab }, [])(url, init);
+    }) as typeof fetch;
+    await tick({ ...loopDeps({}), config: { ...config, agentToken: "tok" }, fetchImpl });
+    expect(seen.map((s) => s.url)).toEqual(["http://crab.local/rfq", "http://raven.local/rfq"]);
+    expect(seen.every((s) => s.token === "tok")).toBe(true);
+    job(1, { ...jobs.get(1)!, state: "awarded", worker: "crab-worker.testnet", escrowed: true, work_deadline: NOW + 500 });
+    await tick({ ...loopDeps({}), config: { ...config, agentToken: "tok" }, fetchImpl });
+    expect(seen.at(-1)).toEqual({ url: "http://crab.local/award", token: "tok" });
   });
 });

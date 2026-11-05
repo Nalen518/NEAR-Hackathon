@@ -7,6 +7,7 @@ import { tick } from "./loop";
 import { openStore } from "./store";
 
 const config = loadConfig();
+if (Object.keys(config.workerUrls).length && !config.agentToken) throw new Error("SHARK_AGENT_TOKEN is not set: the workers would refuse Shark's calls");
 const chain = rpcChain({
   rpcUrl: config.rpcUrl,
   contractId: config.contractId,

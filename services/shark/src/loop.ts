@@ -23,6 +23,8 @@ export const bidDigest = (b: Pick<Bid, "workerId" | "jobId" | "etaSecs">, priceB
   sha256(`sharkco:bid:v2|${b.workerId}|${b.jobId}|${priceBase}|${b.etaSecs}|${expiryUnix}`);
 
 const name = (id: string, config: Config) => (id === config.agents.crab ? "Crab" : id === config.agents.raven ? "Raven" : id);
+/** Calls to Crab and Raven carry the shared secret, so only Shark can start their work (SHARK_AGENT_TOKEN). */
+const workerHeaders = (config: Config): Record<string, string> => ({ "Content-Type": "application/json", ...(config.agentToken ? { "X-Shark-Token": config.agentToken } : {}) });
 const orderId = (id: number) => `j_${String(id).padStart(6, "0")}`;
 
 const DAY = 86_400;
@@ -151,7 +153,7 @@ async function runAuction(d: LoopDeps, job: ContractJob) {
   const answers = await Promise.all(
     eligible.map(async (w): Promise<{ w: ContractWorker; bid: Bid | null; state: BidRow["state"] }> => {
       try {
-        const res = await fetchImpl(`${config.workerUrls[w.id]}/rfq`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rfq), signal: AbortSignal.timeout(RFQ_TIMEOUT_MS) });
+        const res = await fetchImpl(`${config.workerUrls[w.id]}/rfq`, { method: "POST", headers: workerHeaders(config), body: JSON.stringify(rfq), signal: AbortSignal.timeout(RFQ_TIMEOUT_MS) });
         if (res.status === 204) return { w, bid: null, state: "busy" };
         const bid = (await res.json()) as Bid;
         return { w, bid, state: (await validBid(d, bid, w, job.job_type, rfq.jobId, cap)) ? "lost" : "invalid" };
@@ -223,7 +225,7 @@ async function notify(d: LoopDeps, job: ContractJob, row: AuctionRow, round: 1 |
   const url = d.config.workerUrls[job.worker ?? ""];
   if (!url) return;
   const body = { jobId: orderId(job.id), price: fromBase(BigInt(job.worker_fee)), awardTx: row.award_tx, round, ...(round === 2 ? { codes: job.codes } : {}) };
-  const res = await (d.fetchImpl ?? fetch)(`${url}/award`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(RFQ_TIMEOUT_MS) });
+  const res = await (d.fetchImpl ?? fetch)(`${url}/award`, { method: "POST", headers: workerHeaders(d.config), body: JSON.stringify(body), signal: AbortSignal.timeout(RFQ_TIMEOUT_MS) });
   if (res.ok) {
     row.round_sent = round;
     d.store.putAuction(row);
@@ -236,7 +238,7 @@ async function notifyDispute(d: LoopDeps, job: ContractJob, row: AuctionRow) {
   if (!url || job.dispute_until === null) return;
   const reasons = (job.reasons_hash && d.store.blob(job.reasons_hash)) || "";
   const body = { jobId: orderId(job.id), codes: job.codes, reasons, until: new Date(job.dispute_until * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") };
-  const res = await (d.fetchImpl ?? fetch)(`${url}/dispute-window`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(RFQ_TIMEOUT_MS) });
+  const res = await (d.fetchImpl ?? fetch)(`${url}/dispute-window`, { method: "POST", headers: workerHeaders(d.config), body: JSON.stringify(body), signal: AbortSignal.timeout(RFQ_TIMEOUT_MS) });
   if (res.ok) {
     row.round_sent = 3;
     d.store.putAuction(row);

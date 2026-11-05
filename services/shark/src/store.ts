@@ -63,7 +63,12 @@ export function openStore(dir: string) {
   db.prepare("delete from payer_nonces where at < ?").run(Math.floor(Date.now() / 1000) - 86_400);
   type ReceiptRow = Omit<StoredReceipt, "ok" | "args"> & { ok: number; args: string };
   const toReceipt = (r: ReceiptRow): StoredReceipt => ({ ...r, ok: !!r.ok, args: JSON.parse(r.args) });
-  const blob = (hash: string) => join(dir, "files", hash.replace(/^sha256:/, ""));
+  // a hash becomes a file name, and workers choose some hashes (deliver, reasons), so only letters and digits are allowed:
+  // no "..", slash or backslash can reach a file outside files/
+  const blob = (hash: string) => {
+    if (!/^(sha256:)?[0-9a-zA-Z]+$/.test(hash)) throw new Error("not a file hash");
+    return join(dir, "files", hash.replace(/^sha256:/, ""));
+  };
   return {
     putQuote: (q: QuoteRow) =>
       db
