@@ -79,7 +79,7 @@ Expect: the right owner, guardian, Shark, wallet and USDC in `get_roles`; `reser
 | Name | Value |
 | --- | --- |
 | `SHARK_NETWORK` | `testnet` |
-| `TESTNET_RPC_URL` | `https://rpc.testnet.near.org` (or FastNEAR's) |
+| `TESTNET_RPC_URL` | `https://rpc.testnet.fastnear.com` (FastNEAR; NEAR's own `rpc.testnet.near.org` is deprecated and rate limited) |
 | `TESTNET_CONTRACT_ID`, `TESTNET_USDC_ID` | from `accounts.local.json` |
 | `TESTNET_SHARK_ID`, `TESTNET_SHARK_WALLET_ID` | the shark and wallet accounts |
 | `TESTNET_CRAB_ID`, `TESTNET_RAVEN_ID`, `TESTNET_OWL_ID` | the agent accounts |

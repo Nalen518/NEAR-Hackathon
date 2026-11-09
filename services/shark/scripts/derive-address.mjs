@@ -48,7 +48,7 @@ const view = async (rpc, account, method, args = {}) => {
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const [predecessor, path, rpc = "https://rpc.testnet.near.org", signer = "v1.signer-prod.testnet"] = process.argv.slice(2).filter((a) => a !== "--check");
+  const [predecessor, path, rpc = "https://rpc.testnet.fastnear.com", signer = "v1.signer-prod.testnet"] = process.argv.slice(2).filter((a) => a !== "--check");
   if (!predecessor || !path) {
     console.error("usage: node scripts/derive-address.mjs <predecessor account> <path> [near rpc url] [signer account] [--check]");
     process.exit(2);
