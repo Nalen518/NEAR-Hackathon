@@ -36,6 +36,28 @@ function ownersPaid7d(store: Store, total: bigint, now: number) {
   return total - (base === undefined ? 0n : BigInt(snaps[base]));
 }
 
+/** The owners panel from the DAO's own policy and proposals (D-147). Council size and threshold give the approval rule. */
+export function ownersOf(dao: Awaited<ReturnType<Chain["dao"]>>): Pick<Company["owners"], "approvalRule" | "openProposals" | "proposals"> {
+  if (!dao) return { approvalRule: "1 of 1", openProposals: [], proposals: [] };
+  const council = dao.policy.roles.find((r) => r.name === "council");
+  const members = council && typeof council.kind === "object" && council.kind && "Group" in council.kind ? (council.kind as { Group: string[] }).Group.length : 1;
+  const t = dao.policy.default_vote_policy.threshold;
+  const need = Array.isArray(t) ? Math.min(members, Math.floor((members * t[0]) / t[1]) + 1) : Number(t) || 1;
+  const STATUS: Record<string, "open" | "passed" | "rejected"> = { InProgress: "open", Approved: "passed" };
+  const proposals = [...dao.proposals].reverse().map((p) => {
+    const approvals = Object.values(p.votes ?? {}).filter((v) => v === "Approve").length;
+    return {
+      id: p.id,
+      // Sputnik puts links after "$$$$$$" in a description; the first line before it is the title
+      title: (p.description.split("$$$$$$")[0].split("\n")[0].trim() || `Proposal ${p.id}`).slice(0, 100),
+      status: STATUS[p.status] ?? ("rejected" as const),
+      at: iso(Math.floor(Number(BigInt(p.submission_time) / 1_000_000_000n))),
+      votes: `${approvals} of ${need} approvals`,
+    };
+  });
+  return { approvalRule: `${need} of ${members}`, openProposals: proposals.filter((p) => p.status === "open").map(({ id, title }) => ({ id, title })), proposals };
+}
+
 /** wei as an ETH decimal string with all 18 places */
 const eth = (wei: bigint) => `${wei / 10n ** 18n}.${(wei % 10n ** 18n).toString().padStart(18, "0")}`;
 const PAYOUT_GAS = 65_000n; // an ERC-20 transfer, with room
@@ -107,6 +129,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
   const jobs: ContractJob[] = [];
   for (let from = 1; from <= stats.jobs; from += 100) jobs.push(...(await chain.jobs(from, 100)));
   const sharkWallet = await chain.usdcBalance(roles.shark_wallet).catch(() => "0");
+  const dao = await chain.dao(roles.owner).catch(() => null);
 
   const idOf = (account: string | null): WorkerId | null =>
     account === config.agents.crab ? "crab" : account === config.agents.raven ? "raven" : null;
@@ -280,10 +303,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
     recentJobs: ledger,
     owners: {
       dao: roles.owner,
-      // shortcut: no Sputnik DAO yet (O-09); the owner is one account, so proposals are empty and marked sample
-      approvalRule: "1 of 1",
-      openProposals: [],
-      proposals: [],
+      ...ownersOf(dao),
       ownersWaiting: usdc(stats.owner_accrued),
       trezuUrl: config.trezuUrl ?? "",
     },
@@ -318,7 +338,7 @@ export async function companyOf(config: Config, chain: Chain, store: Store, now:
       workers: false,
       reviewer: !reviewer,
       recentJobs: false,
-      owners: true,
+      owners: !dao, // a plain owner account has no proposals to show
       config: false,
       payouts: !config.eventsUrl,
       guardian: false,

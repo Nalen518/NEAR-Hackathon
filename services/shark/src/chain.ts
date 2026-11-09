@@ -132,7 +132,13 @@ export type Chain = {
   returnX402(settlement: X402Settlement): Promise<string>;
   /** Raven's Base balance and gas price in wei, or null when no EVM RPC or address is configured (C2) */
   ravenGas(): Promise<{ balanceWei: string; gasPriceWei: string } | null>;
+  /** The owner's Sputnik DAO: its policy and newest proposals, or null when the owner is a plain account (views fail) */
+  dao(id: string): Promise<{ policy: DaoPolicy; proposals: DaoProposal[] } | null>;
 };
+
+/** Sputnik DAO v2 views (`get_policy`, `get_proposals`), only the fields Shark reads. */
+export type DaoPolicy = { roles: { name: string; kind: "Everyone" | { Group: string[] } | unknown; permissions: string[]; vote_policy: Record<string, { threshold: unknown }> }[]; default_vote_policy: { threshold: [number, number] | string } };
+export type DaoProposal = { id: number; description: string; status: string; submission_time: string; vote_counts: Record<string, [string | number, string | number, string | number]>; votes: Record<string, string> };
 
 export type X402Settlement = { tx_hash: string; payer: string; amount: string };
 
@@ -211,6 +217,14 @@ export function rpcChain(opts: ChainOpts): Chain {
     payOwners: () => call(wallet(), "pay_owners", {}, 100n * TGAS),
     retryOwed: (id) => call(wallet(), "retry_owed", { id }, 100n * TGAS),
     markPaidX402: (quote, sig, settlement) => call(shark(), "mark_paid_x402", { quote, sig, settlement }, 100n * TGAS),
+    dao: async (id) => {
+      // shortcut: the 20 newest proposals only, enough for the owners panel
+      const policy = await view<DaoPolicy>("get_policy", {}, id).catch(() => null);
+      if (!policy) return null;
+      const last = await view<number>("get_last_proposal_id", {}, id);
+      const proposals = last > 0 ? await view<DaoProposal[]>("get_proposals", { from_index: Math.max(0, last - 20), limit: 20 }, id) : [];
+      return { policy, proposals };
+    },
     ravenGas: async () => {
       if (!opts.evmRpcUrl || !opts.payoutEvmAddress) return null;
       const rpc = async (method: string, params: unknown[]) => {

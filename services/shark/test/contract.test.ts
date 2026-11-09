@@ -133,6 +133,7 @@ const fakeChain = (over: Partial<Chain> = {}): Chain => ({
   },
   returnX402: async (s) => (txs.push(`return_x402 ${s.tx_hash}`), "TxReturn"),
   ravenGas: async () => null,
+  dao: async () => null,
   ...over,
 });
 
@@ -1524,5 +1525,25 @@ describe("PDF page limit is checked before any text is read (audit 6)", () => {
     expect((await parsed(ApiError, big)).error).toBe("input_too_large");
     const ok = await parsed(UploadResult, await send(manyPages(20)));
     expect(ok.pages).toBe(20);
+  });
+});
+
+describe("owners panel from the owners' Sputnik DAO", () => {
+  const policy = { roles: [{ name: "all", kind: "Everyone", permissions: ["*:AddProposal"], vote_policy: {} }, { name: "council", kind: { Group: ["a.testnet", "b.testnet", "c.testnet"] }, permissions: ["*:VoteApprove"], vote_policy: {} }], default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: [1, 2] as [number, number] } };
+  const p = (id: number, status: string, votes: Record<string, string>, description = `Set thread band ${id}`) => ({ id, proposer: "a.testnet", description, kind: { FunctionCall: {} }, status, vote_counts: {}, votes, submission_time: String(BigInt(NOW - 1000 + id) * 1_000_000_000n) });
+
+  it("is live: the rule, open proposals and the history come from the DAO, newest first", async () => {
+    app = makeApp(fakeChain({ dao: async () => ({ policy, proposals: [p(0, "Approved", { "a.testnet": "Approve", "b.testnet": "Approve" }), p(1, "Rejected", { "a.testnet": "Reject" }), p(2, "InProgress", { "a.testnet": "Approve" }, "Raise the review fee$$$$$$https://forum.example/t/1")] }) }));
+    const c = await parsed(Company, await get("/v1/company"));
+    expect(c.owners.approvalRule).toBe("2 of 3");
+    expect(c.owners.openProposals).toEqual([{ id: 2, title: "Raise the review fee" }]);
+    expect(c.owners.proposals.map((x) => [x.id, x.status, x.votes])).toEqual([[2, "open", "1 of 2 approvals"], [1, "rejected", "0 of 2 approvals"], [0, "passed", "2 of 2 approvals"]]);
+    expect(c.owners.proposals[0].at).toBe(new Date((NOW - 998) * 1000).toISOString().replace(".000", ""));
+    expect(c.sample.owners).toBe(false);
+  });
+  it("a plain owner account stays sample, and a DAO the RPC can't read does not break the page", async () => {
+    expect((await parsed(Company, await get("/v1/company"))).sample.owners).toBe(true);
+    app = makeApp(fakeChain({ dao: async () => { throw new Error("rpc down"); } }));
+    expect((await parsed(Company, await get("/v1/company"))).owners.approvalRule).toBe("1 of 1");
   });
 });
