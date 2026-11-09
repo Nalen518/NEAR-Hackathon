@@ -6,7 +6,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useCompany, useShark } from "@/lib/api";
 import { DELIVERED, mergePayerView } from "@/lib/payer-view";
-import { jobNo } from "@/lib/text";
+import { jobNo, timeLeft } from "@/lib/text";
 import { useNow } from "@/lib/time";
 import { timelineRows } from "@/lib/timeline";
 import { useWallet } from "@/lib/wallet";
@@ -38,7 +38,7 @@ function stateOf(o: Order, usd: string, now: number): State | null {
     case "review": {
       const n = o.brief.checklist.length;
       const code = o.brief.checklist.filter((c) => c.kind === "code").length;
-      return { title: "Owl is checking the work", chip: "reviewing", text: `Owl is running ${n} checks: ${code} by code, ${n - code} by a model: inside an OutLayer TEE.`, money: held, mascot: ["owl", "reviewing"] };
+      return { title: "Owl is checking the work", chip: "reviewing", text: `Owl is running ${n} checks: ${code} by code, ${n - code} by a model.`, money: held, mascot: ["owl", "reviewing"] };
     }
     case "revision":
       return { title: "One revision", chip: "revision", text: `The first try failed ${failText || "a check"}. ${W} is revising. Nobody is paid yet.`, money: held, mascot: [w, "revising"] };
@@ -51,7 +51,7 @@ function stateOf(o: Order, usd: string, now: number): State | null {
     case "complaint_review":
       return { title: "Complaint under review", chip: "complaint", text: "Owl compares your order with Shark’s brief. Your delivery stays open meanwhile.", money: "split on hold until it’s decided", mascot: ["owl", "reviewing"] };
     case "finalized":
-      return { title: "Finalized", chip: "finalized", text: `The 24 h window ended. ${W}, Owl, the referrer, the owners and the reserve are paid.`, money: "spent · job closed", mascot: [w, "paid"] };
+      return { title: "Finalized", chip: "finalized", text: `The complaint window ended. ${W}, Owl, ${o.money && Number(o.money.referral) > 0 ? "the referrer, " : ""}the owners and the reserve are paid.`, money: "spent · job closed", mascot: [w, "paid"] };
     case "needs_review":
       return { title: "Being checked by hand", chip: "needs review", text: "A payment step is being checked by hand. Your money is safe: the job will finish or be refunded.", money: `${o.price} ${usd} held in the company contract`, mascot: ["shark", "idle"] };
     case "refund_due":
@@ -183,11 +183,11 @@ export function JobView({ orderId }: { orderId: string }) {
   const state = stateOf(o, usd, now);
   const winner = o.auction?.bids.find((b) => b.state === "winner");
   const W = winner ? NAME[winner.worker] : "The worker";
-  const hoursLeft = o.complaint.allowedUntil ? Math.max(0, Math.floor((Date.parse(o.complaint.allowedUntil) - now) / 3_600_000)) : 0;
+  const left = timeLeft(o.complaint.allowedUntil ? Date.parse(o.complaint.allowedUntil) - now : 0);
   const lede = state
     ? state.text
     : isPayer
-      ? `Delivered. ${W} did the work, Owl passed it in a TEE, and ${W} and Owl are paid. You have ${hoursLeft} h left to complain. The rest of the split waits until then.`
+      ? `Delivered. ${W} did the work, Owl passed it, and ${W} and Owl are paid. You have ${left} left to complain. The rest of the split waits until then.`
       : "Delivered. The checks, the auction and every payout are public. The instructions and the delivery are private to the payer.";
   const workers: Worker[] = company.data?.workers ?? [];
   const reviews = o.reviews.filter((r) => r.mode !== "complaint");
@@ -256,7 +256,7 @@ export function JobView({ orderId }: { orderId: string }) {
             )}
           </Step>
 
-          <Step n="03" title="The review" done={reviews.some((r) => r.pass)} note="Code checks first, then a model check, inside an OutLayer TEE. Model checks can be wrong: a worker can dispute a fail and a different model decides.">
+          <Step n="03" title="The review" done={reviews.some((r) => r.pass)} note="Code checks first, then a model check. Model checks can be wrong: a worker can dispute a fail and a different model decides.">
             {reviews.length ? (
               reviews.map((r, i) => (
                 <ReviewReport
@@ -281,7 +281,7 @@ export function JobView({ orderId }: { orderId: string }) {
             )}
           </Step>
 
-          <Step n="04" title="The delivery" done={isPayer ? !!p.delivery : false} note={isPayer ? "Rendered as plain text, never HTML. Complaints need your wallet signature and close 24 h after the review passed." : "Signing is free and moves no money. Everyone else sees the review and the payouts."}>
+          <Step n="04" title="The delivery" done={isPayer ? !!p.delivery : false} note={isPayer ? "Rendered as plain text, never HTML. Complaints need your wallet signature and close when the complaint window ends." : "Signing is free and moves no money. Everyone else sees the review and the payouts."}>
             {isPayer ? (
               p.delivery ? (
                 <DeliveryView delivery={p.delivery} />

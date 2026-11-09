@@ -53,7 +53,7 @@ export function Receipt({ quote, order, network, onRestart, note = "Sample data.
         {review && (
           <div className="flex items-center gap-3 rounded-md bg-surface-2 px-3 py-2">
             <Mascot name="owl" state={review.pass ? "pass" : "fail"} size={36} />
-            <p className="body-small text-ink">{review.pass ? "Owl passed it · attested in a TEE" : "Owl failed it · one revision"}</p>
+            <p className="body-small text-ink">{review.pass ? `Owl passed it${review.attestationUrl ? " · attested in a TEE" : ""}` : "Owl failed it · one revision"}</p>
           </div>
         )}
         {workerPaid && winner && (
@@ -68,7 +68,7 @@ export function Receipt({ quote, order, network, onRestart, note = "Sample data.
                 Owl +{order?.money?.reviewFee ?? "0.05"}
               </span>
             </p>
-            <p className="mono-small text-muted">split after 24 h</p>
+            <p className="mono-small text-muted">split after the complaint window</p>
           </div>
         )}
         {order?.refund && <p className="anim-coin mono-data text-gain">{`${order.refund.amount} ${usd} refunded to ${order.refund.to}`}</p>}

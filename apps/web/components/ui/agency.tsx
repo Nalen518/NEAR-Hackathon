@@ -131,7 +131,7 @@ export function Checklist({
       <p className="mono-label text-muted">{codeTitle}</p>
       {code.map(row)}
       <p className="mono-label pt-2 text-muted">
-        Checked by AI · Owl, in a TEE
+        Checked by AI · Owl
       </p>
       {model.map(row)}
     </div>
@@ -416,6 +416,7 @@ export function ReviewReport({
   attestationHref?: string;
 }) {
   const second = review.mode !== "primary";
+  const attested = !!review.attestationUrl; // no TEE claim without an attestation
   const title = second
     ? review.pass
       ? "Second opinion · fail overturned"
@@ -439,8 +440,8 @@ export function ReviewReport({
             <p className="mono-small text-muted">
               {second
                 ? "dispute · secondary · different model"
-                : `round ${review.round} · primary`}{" "}
-              · OutLayer TEE
+                : `round ${review.round} · primary`}
+              {attested && " · OutLayer TEE"}
             </p>
           </div>
           <span
@@ -474,9 +475,11 @@ export function ReviewReport({
         </div>
         <p className="body-small text-ink">{summary}</p>
         <p className="sr-only">Reviewer: Owl. Worker: {worker}.</p>
-        <ProofPill kind="review" href={attestationHref}>
-          Owl review · attested
-        </ProofPill>
+        {attested && (
+          <ProofPill kind="review" href={attestationHref}>
+            Owl review · attested
+          </ProofPill>
+        )}
       </section>
     </Play>
   );
@@ -705,7 +708,7 @@ export function DeliveryView({
       </p>
       <div className="flex items-center justify-between">
         <p className="mono-small text-muted">
-          {wordCount(delivery.content)} words · reviewed by Owl · attested
+          {wordCount(delivery.content)} words · reviewed by Owl
         </p>
         <Button
           variant="ghost"
@@ -739,7 +742,7 @@ const STEP: Partial<
     e.amount ? `bid ${e.amount}` : "",
   ],
   delivered_for_review: (e) => ["Delivered", `round ${e.round ?? 1}`],
-  review_pass: () => ["Passed review", "Owl · attested"],
+  review_pass: () => ["Passed review", "Owl"],
   review_fail: () => ["Review: fail", "one revision"],
   revision_requested: () => ["Revision", "round 2"],
   dispute: () => ["Dispute", "second model asked"],
@@ -769,7 +772,7 @@ export function JobTimeline({
   const next: [string, string] | null = FINAL.has(order.status)
     ? null
     : order.status === "delivered"
-      ? ["Finalized", "after 24 h"]
+      ? ["Finalized", "after the window"]
       : ["Next", "in progress"];
   return (
     <ol className="flex items-start overflow-x-auto rounded-pane border border-line bg-surface px-6 py-5">
@@ -1038,7 +1041,10 @@ export function ReviewerCard({
         />
         <div className="flex flex-1 flex-col">
           <h3 className="display-s text-ink">Owl</h3>
-          <p className="mono-small text-muted">{r.account} · OutLayer TEE</p>
+          <p className="mono-small text-muted">
+            {r.account}
+            {attestationHref && " · OutLayer TEE"}
+          </p>
         </div>
         <span
           className={cx(
@@ -1046,7 +1052,7 @@ export function ReviewerCard({
             r.suspended ? "bg-ink text-surface" : "bg-accent text-surface",
           )}
         >
-          {r.suspended ? "suspended" : "attested"}
+          {r.suspended ? "suspended" : attestationHref ? "attested" : "active"}
         </span>
       </div>
       <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -1065,12 +1071,14 @@ export function ReviewerCard({
         ))}
       </div>
       <p className="body-small text-ink">
-        Code checks first, then a model check, inside a TEE. Disputes go to a
-        different model. Paid per review, pass or fail.
+        Code checks first, then a model check{attestationHref && ", inside a TEE"}.
+        Disputes go to a different model. Paid per review, pass or fail.
       </p>
-      <ProofPill kind="review" href={attestationHref}>
-        Owl review · attested
-      </ProofPill>
+      {attestationHref && (
+        <ProofPill kind="review" href={attestationHref}>
+          Owl review · attested
+        </ProofPill>
+      )}
     </article>
   );
 }
@@ -1215,13 +1223,13 @@ export function ComplaintBox({
             and the delivery is yours.
           </p>
           <p className="mono-small text-muted">
-            Second review · different model · attested
+            Second review · different model
           </p>
         </>
       )}
       {state === "closed" && (
         <p className="body-small text-muted">
-          The 24 hour window has ended. The job is final: the worker, Owl, the
+          The complaint window has ended. The job is final: the worker, Owl, any
           referrer, the owners and the reserve have been paid.
         </p>
       )}

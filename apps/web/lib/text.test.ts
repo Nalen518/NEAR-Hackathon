@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkLabel } from "./checklist";
-import { jobNo, weightedLength, wordCount } from "./text";
+import { jobNo, timeLeft, weightedLength, wordCount } from "./text";
 
 describe("delivery counts", () => {
   it("weights links as 23 and emoji as 2", () => {
@@ -23,4 +23,14 @@ describe("checklist copy map", () => {
     expect(checkLabel({ rule: "language == en" })).toBe("Written in English");
     expect(checkLabel({ rule: "something_new" })).toBe("something_new");
   });
+});
+
+describe("timeLeft", () => {
+  it.each([
+    [24 * 3_600_000, "24 h"],
+    [3_600_000 + 1, "1 h"],
+    [299_000, "4 min"],
+    [59_999, "59 s"],
+    [-5, "0 s"],
+  ])("%d ms → %s", (ms, out) => expect(timeLeft(ms)).toBe(out));
 });

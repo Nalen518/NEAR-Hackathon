@@ -30,7 +30,7 @@ export function timelineRows(o: Pick<Order, "timeline" | "reviews" | "proof" | "
       case "review_pass":
       case "second_review_pass": {
         const n = lastPass?.checks?.length;
-        rows.push({ at, text: `Owl passed it in a TEE${n ? `: ${n} of ${n} checks` : ""}${e.event === "second_review_pass" ? " (second model)" : ""}`, link: lastPass?.attestationUrl ? { label: "attestation ↗", href: o.sample ? undefined : lastPass.attestationUrl } : undefined });
+        rows.push({ at, text: `Owl passed it${lastPass?.attestationUrl ? " in a TEE" : ""}${n ? `: ${n} of ${n} checks` : ""}${e.event === "second_review_pass" ? " (second model)" : ""}`, link: lastPass?.attestationUrl ? { label: "attestation ↗", href: o.sample ? undefined : lastPass.attestationUrl } : undefined });
         break;
       }
       case "review_fail":
