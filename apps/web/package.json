@@ -12,8 +12,14 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@near-wallet-selector/core": "10.1.4",
+    "@near-wallet-selector/here-wallet": "10.1.4",
+    "@near-wallet-selector/intear-wallet": "10.1.4",
+    "@near-wallet-selector/meteor-wallet": "10.1.4",
+    "@near-wallet-selector/modal-ui": "10.1.4",
     "@shark/shared": "workspace:*",
     "@tanstack/react-query": "5.104.5",
+    "near-api-js": "6.5.1",
     "next": "16.4.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",

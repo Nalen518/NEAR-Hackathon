@@ -26,8 +26,9 @@ export type Wallet = {
   signMessage(message: string): Promise<SignedMessage>;
 };
 
-// shortcut: live mode needs NEAR Wallet Selector (@near-wallet-selector/*); wire it in W6 with the
-// owner's go — the gate forbids real wallet calls before then. Mock mode signs against mocks/scenarios.
+// Live mode uses NEAR Wallet Selector (lib/wallet-live.ts, loaded on first use). Mock mode signs against mocks/scenarios.
+const live = () => import("./wallet-live");
+
 export function useWallet(network: Network): Wallet {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,7 +42,17 @@ export function useWallet(network: Network): Wallet {
   }
 
   const connect = useCallback(async () => {
-    if (API_MODE !== "mock") throw new Error("NEAR Wallet Selector isn't wired yet (W6).");
+    if (API_MODE === "live") {
+      setBusy(true);
+      try {
+        const id = await (await live()).connect(network);
+        signer.current = { id, network };
+        setAccountId(id);
+        return id;
+      } finally {
+        setBusy(false);
+      }
+    }
     setBusy(true);
     await new Promise((r) => setTimeout(r, 400));
     const id = network === "testnet" ? "demo-buyer.testnet" : "demo-buyer.near";
@@ -55,9 +66,9 @@ export function useWallet(network: Network): Wallet {
     async (c: ContractCall) => {
       const id = signer.current?.network === network ? signer.current.id : null;
       if (!id) throw new Error("Connect a NEAR wallet first.");
-      if (API_MODE !== "mock") throw new Error("NEAR Wallet Selector isn't wired yet (W6).");
       setBusy(true);
       try {
+        if (API_MODE === "live") return await (await live()).call(network, c);
         await new Promise((r) => setTimeout(r, 700)); // the user approving in their wallet
         return mockChainCall(id, c.method, c.args);
       } finally {
@@ -71,9 +82,9 @@ export function useWallet(network: Network): Wallet {
     async (message: string): Promise<SignedMessage> => {
       const id = signer.current?.network === network ? signer.current.id : null;
       if (!id) throw new Error("Connect a NEAR wallet first.");
-      if (API_MODE !== "mock") throw new Error("NEAR Wallet Selector isn't wired yet (W6).");
       setBusy(true);
       try {
+        if (API_MODE === "live") return await (await live()).signMessage(network, message);
         await new Promise((r) => setTimeout(r, 500)); // the user approving in their wallet
         const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
         return { accountId: id, publicKey: "ed25519:SAMPLE", signature: "SAMPLE", message, nonce, recipient: NETWORKS[network].contract || "sharkco.testnet" };
@@ -87,7 +98,8 @@ export function useWallet(network: Network): Wallet {
   const disconnect = useCallback(() => {
     signer.current = null;
     setAccountId(null);
-  }, []);
+    if (API_MODE === "live") void live().then((w) => w.disconnect(network));
+  }, [network]);
 
   return { accountId, busy, connect, disconnect, call, signMessage };
 }
