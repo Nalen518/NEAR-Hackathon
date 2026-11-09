@@ -94,7 +94,7 @@ async function assertPublic(url: URL) {
   if (ips.some(isPrivate)) throw unreadable("the link points to a private address");
 }
 
-// shortcut: the address is checked before connecting, so a DNS answer that changes in between (rebinding) is not caught; pin the IP via a custom agent before mainnet-lite
+// shortcut: the address is checked before connecting, so a DNS answer that changes in between (rebinding) is not caught; pin the IP via a custom agent before real money is involved
 export async function fetchSnapshot(raw: string, fetchImpl: typeof fetch = fetch): Promise<Snapshot> {
   let url: URL;
   try {
