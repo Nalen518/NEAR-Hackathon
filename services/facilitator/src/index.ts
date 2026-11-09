@@ -7,7 +7,7 @@ import { createFacilitatorApp } from "./app";
 
 const env = process.env;
 const net = env.SHARK_NETWORK;
-if (net !== "testnet" && net !== "mainnet") throw new Error("SHARK_NETWORK must be testnet or mainnet");
+if (net !== "testnet") throw new Error("SHARK_NETWORK must be testnet"); // the build is testnet only
 const NET = net.toUpperCase();
 const need = (name: string) => env[name] || (() => { throw new Error(`${name} is not set`); })();
 

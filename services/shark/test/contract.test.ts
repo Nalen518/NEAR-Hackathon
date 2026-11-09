@@ -1184,7 +1184,9 @@ describe("event reader", () => {
     });
     it("the reader is off when its url is off", async () => {
       expect(loadConfig({ SHARK_NETWORK: "testnet", TESTNET_RPC_URL: "x", TESTNET_CONTRACT_ID: "c", TESTNET_USDC_ID: "u", SHARK_QUOTE_KEY: "k", TESTNET_EVENTS_URL: "off" }).eventsUrl).toBeNull();
-      expect(loadConfig({ SHARK_NETWORK: "mainnet", MAINNET_RPC_URL: "x", MAINNET_CONTRACT_ID: "c", MAINNET_USDC_ID: "u", SHARK_QUOTE_KEY: "k" }).eventsUrl).toBe("https://api.nearblocks.io");
+      expect(loadConfig({ SHARK_NETWORK: "testnet", TESTNET_RPC_URL: "x", TESTNET_CONTRACT_ID: "c", TESTNET_USDC_ID: "u", SHARK_QUOTE_KEY: "k" }).eventsUrl).toBe("https://api-testnet.nearblocks.io");
+      // the build is testnet only
+      expect(() => loadConfig({ SHARK_NETWORK: "mainnet", MAINNET_RPC_URL: "x", MAINNET_CONTRACT_ID: "c", MAINNET_USDC_ID: "u", SHARK_QUOTE_KEY: "k" })).toThrow("SHARK_NETWORK must be testnet");
     });
   });
 

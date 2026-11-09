@@ -1,5 +1,7 @@
 # Shark & Co. — Architecture
 
+> **Scope (9 Nov 2026): testnet only.** The hackathon build runs on NEAR testnet only: live site https://sharkco.vercel.app, backend on Railway, contract `sharkco.testnet`, owners' DAO `sharkco-owners.sputnikv2.testnet`. Mainnet-lite, NEAR Intents (method 2) and every mainnet column or row below were planned but are **not built and not deployed**. The web has no network switch, and Shark and the facilitator refuse any network but testnet.
+
 How the zero-employee agency fits together: deployments, components, keys, data, money flow, loops, repo layout. Requirements: `shark-co-SRD.md` v2.0. Shapes and external resources: `API-CONTRACT.md`.
 
 ---
@@ -62,7 +64,7 @@ flowchart LR
 | Settings | daily_budget 4.00, floor 12.10, seed 16.10 | daily_budget 0.60, floor 1.90, seed 2.50 |
 | Lifetime | Leave running | Through 18 Nov 23:59 UTC → pause → `wind_down` |
 
-Same code for both; differences live in env vars and contract config. **One web app** serves both with a `Testnet | Mainnet` switch (opens on Testnet; `?network=`).
+Only the testnet column is built. The web app serves testnet only, with a fixed "testnet · test USDC" badge instead of a network switch.
 
 ## 3. Components
 

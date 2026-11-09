@@ -1,11 +1,13 @@
 # Shark & Co. — API contract
 
+> **Scope (9 Nov 2026): testnet only.** The hackathon build runs on NEAR testnet only: live site https://sharkco.vercel.app, backend on Railway, contract `sharkco.testnet`, owners' DAO `sharkco-owners.sputnikv2.testnet`. Mainnet-lite, NEAR Intents (method 2) and every mainnet column or row below were planned but are **not built and not deployed**. The web has no network switch, and Shark and the facilitator refuse any network but testnet.
+
 The single source for every interface: the Shark HTTP API, the worker and reviewer interfaces, the company contract, shared data shapes, and **every external resource we use** (§5). If code and this file disagree, fix one of them in the same change.
 
 | Field | Value |
 | --- | --- |
 | Version | **2.3** (31 Oct: checked against docs.near.org, `near/agent-skills`, the x402 spec v2 and `@x402/near`; see §5.3. 1 Nov: payer view and complaint shapes settled with the web, D-172. The additions P1 to P6 in `docs/web/API-CHANGE-PROPOSAL-v2.3.md` are part of this version) |
-| Deployments | One Shark host per deployment: **testnet** (methods 1 + 3) and **mainnet-lite** (methods 1 + 2 + 3). Method 1 = signed quote · 2 = NEAR Intents · 3 = x402 |
+| Deployments | One Shark host on **testnet** (methods 1 + 3). Method 1 = signed quote · 3 = x402. (Mainnet-lite with method 2, NEAR Intents, was planned and dropped.) |
 
 ---
 

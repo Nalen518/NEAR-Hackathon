@@ -5,7 +5,7 @@ import type { Network } from "@shark/shared";
 export type Config = {
   network: Network;
   /** CAIP-2, e.g. "near:testnet". */
-  networkId: "near:testnet" | "near:mainnet";
+  networkId: "near:testnet";
   rpcUrl: string;
   contractId: string;
   usdcId: string;
@@ -46,7 +46,8 @@ export type Config = {
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const network = env.SHARK_NETWORK;
-  if (network !== "testnet" && network !== "mainnet") throw new Error("SHARK_NETWORK must be testnet or mainnet");
+  // the build is testnet only: there is no mainnet contract, account or Shark
+  if (network !== "testnet") throw new Error("SHARK_NETWORK must be testnet");
   const NET = network.toUpperCase();
   const need = (name: string): string => {
     const v = env[`${NET}_${name}`];
@@ -54,7 +55,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     return v;
   };
   // An empty line like `PORT=` (copied from .env.example) means "not set", so every default below uses || and not ??
-  const events = env[`${NET}_EVENTS_URL`] || (network === "testnet" ? "https://api-testnet.nearblocks.io" : "https://api.nearblocks.io");
+  const events = env[`${NET}_EVENTS_URL`] || "https://api-testnet.nearblocks.io";
   return {
     network,
     networkId: `near:${network}`,

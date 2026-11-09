@@ -53,7 +53,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     console.error("usage: node scripts/derive-address.mjs <predecessor account> <path> [near rpc url] [signer account] [--check]");
     process.exit(2);
   }
-  if (!/\.testnet$/.test(signer) && !process.env.ALLOW_MAINNET) {
+  if (!/\.testnet$/.test(signer)) {
     console.error(`${signer} is not a testnet signer. This project uses testnet only.`);
     process.exit(2);
   }

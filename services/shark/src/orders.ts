@@ -127,7 +127,7 @@ export function orderRoutes(app: Hono, d: OrderDeps) {
     const params = PARAMS[parsed.data.jobType].safeParse((body as { params?: unknown }).params ?? {});
     if (!params.success) throw badField("instructions", "Check the options for this job type and send the order again.");
     const req = { ...parsed.data, params: params.data };
-    if (req.payWith) throw new HttpError(422, "intents_unavailable", "Paying from another chain works on mainnet only.");
+    if (req.payWith) throw new HttpError(422, "intents_unavailable", "Paying from another chain is not offered. Pay in test USDC on NEAR testnet.");
 
     const idem = c.req.header("Idempotency-Key") ?? null;
     const bodyHash = sha256Ref(canonicalJson(req));
