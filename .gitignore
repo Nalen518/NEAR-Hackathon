@@ -62,9 +62,9 @@ Thumbs.db
 *.log
 
 # internal working files: kept on disk, not in the repo (the e2e tests write the screenshots here)
-docs/web/
 spikes/
-docs/brand/figma/*-v1.0.png
-docs/agent-prompt-*.md
-docs/backend/checklist.md
-docs/backend/FOR-FRONTEND.md
+# only these three docs are published; everything else in docs/ stays local
+docs/*
+!docs/API-CONTRACT.md
+!docs/ARCHITECTURE.md
+!docs/HACKATHON.md
