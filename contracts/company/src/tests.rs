@@ -1026,3 +1026,26 @@ fn hashes_of_the_right_shape_pass_and_others_do_not() {
         assert!(std::panic::catch_unwind(|| super::check_hash(bad)).is_err(), "{bad:?} should be refused");
     }
 }
+
+#[test]
+fn the_owner_can_hand_the_company_to_the_dao_and_then_only_the_dao_acts() {
+    let mut c = setup();
+    ctx("dao.testnet", 2_000);
+    c.set_owner(acc("owners.sputnikv2.testnet"));
+    assert_eq!(c.get_roles().owner, acc("owners.sputnikv2.testnet"));
+    ctx("owners.sputnikv2.testnet", 2_001);
+    c.set_config(config()); // the new owner can
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx("dao.testnet", 2_002);
+        c.reset_strikes(); // the old owner no longer can
+    }))
+    .is_err());
+}
+
+#[test]
+#[should_panic(expected = "E_UNAUTHORIZED")]
+fn nobody_else_can_change_the_owner() {
+    let mut c = setup();
+    ctx("shark.testnet", 2_000);
+    c.set_owner(acc("shark.testnet"));
+}

@@ -433,6 +433,14 @@ impl Contract {
         self.strikes = 0;
     }
 
+    /// Hands the company to a new owner, such as the owners' Sputnik DAO (D-147). Owner only. Adds no stored field,
+    /// so this code can replace a deployed contract without a migration.
+    pub fn set_owner(&mut self, owner: AccountId) {
+        self.only(&self.owner.clone());
+        self.owner = owner;
+        emit("owner_changed", json!({ "owner": self.owner }));
+    }
+
     pub fn set_shark_wallet(&mut self, wallet: AccountId) {
         self.only(&self.owner.clone());
         self.shark_wallet = wallet;
