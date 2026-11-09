@@ -160,6 +160,30 @@ NEXT_PUBLIC_TESTNET_EVM_EXPLORER_URL=https://sepolia.basescan.org
 
 The wallet list (`NEXT_PUBLIC_TESTNET_WALLETS`) waits for W6.
 
+## 8a. Hosting the demo: Shark and agents on Railway, the web on Vercel
+
+Do sections 1 to 3 first: Shark needs the contract and USDC ids, and the web needs Shark's URL.
+
+**Railway, one service per process,** each from the repo root (pnpm workspace, Node 22.13 or newer from `engines`). Set `ENABLE_EXPERIMENTAL_COREPACK=1` (the repo uses pnpm 11.9.0).
+
+| Service | Start command | Port | Notes |
+| --- | --- | --- | --- |
+| Shark | `pnpm --filter @shark/service start` | `PORT` from Railway | public domain. **Volume** mounted at e.g. `/data`, with `FILE_STORE_PATH=/data`, or every redeploy loses quotes, uploads and deliveries. **One replica**: the rate limit and SQLite live in one process |
+| Crab | `AGENT_ROLE=crab`, `pnpm --filter @shark/agents exec tsx src/index.ts` | `PORT` | private networking is enough: Shark's `TESTNET_CRAB_URL=http://<crab>.railway.internal:<port>` |
+| Raven | same, `AGENT_ROLE=raven` | `PORT` | `TESTNET_RAVEN_URL` the same way |
+| Owl | same, `AGENT_ROLE=owl` | none | background worker |
+| Facilitator (optional) | `pnpm --filter @shark/facilitator start` | `PORT` | only for x402 |
+
+- Railway passes settings as variables, not files. The start scripts read `.env` only if it exists (`--env-file-if-exists`), so the same commands work locally and on Railway.
+- Put every value from the `.env.example` files into the service's Railway variables. Secrets go there, never into git or chat.
+- Health check path for Shark: `/v1/health`.
+- `PUBLIC_BASE_URL` is Shark's Railway URL. `TESTNET_API_URL` for the agents is the same URL.
+- Railway's proxy appends the real client address to `x-forwarded-for`, which the rate limit uses.
+
+**Vercel:** root directory `apps/web`, framework Next.js, `ENABLE_EXPERIMENTAL_COREPACK=1`. Variables as in section 8, with `NEXT_PUBLIC_TESTNET_API_URL` set to Shark's Railway URL (origin only). `NEXT_PUBLIC_*` values are built into the site, so a change needs a redeploy. The web has no secrets.
+
+**Last:** put the production Vercel domain into Shark's `WEB_ORIGINS` and redeploy Shark. Origins match exactly, so Vercel preview URLs are refused; demo on the production domain.
+
 ## 9. Safety
 
 - The guardian can `pause` the contract, and nothing else.

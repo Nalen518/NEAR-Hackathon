@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "tsx --env-file=.env src/index.ts",
+    "start": "tsx --env-file-if-exists=.env src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run"
@@ -16,6 +16,7 @@
     "@shark/shared": "workspace:*",
     "hono": "4.13.13",
     "near-api-js": "7.3.1",
+    "tsx": "4.23.15",
     "unpdf": "1.9.0",
     "zod": "4.6.7"
   },
@@ -23,8 +24,10 @@
     "@noble/curves": "1.8.1",
     "@noble/hashes": "1.8.0",
     "@types/node": "22.19.1",
-    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "5.0.5"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

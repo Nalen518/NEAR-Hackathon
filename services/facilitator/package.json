@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx --env-file=.env src/index.ts",
+    "start": "tsx --env-file-if-exists=.env src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run"
@@ -13,13 +13,16 @@
     "@hono/node-server": "2.1.5",
     "@x402/core": "2.29.0",
     "@x402/near": "2.29.0",
-    "hono": "4.13.13"
+    "hono": "4.13.13",
+    "tsx": "4.23.15"
   },
   "devDependencies": {
     "@types/node": "22.19.1",
     "near-api-js": "7.3.1",
-    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "5.0.5"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }
