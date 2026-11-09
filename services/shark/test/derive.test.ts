@@ -27,3 +27,14 @@ describe("gas gauge config", () => {
     expect(loadConfig({ ...env, TESTNET_EVM_RPC_URL: "https://base.example", TESTNET_PAYOUT_EVM_ADDRESS: "0xabc" })).toMatchObject({ evmRpcUrl: "https://base.example", payoutEvmAddress: "0xabc" });
   });
 });
+
+describe("an empty env line means not set", () => {
+  it("falls back to the defaults instead of 0 or an empty string", async () => {
+    const { loadConfig } = await import("../src/config");
+    const env = { SHARK_NETWORK: "testnet", TESTNET_RPC_URL: "x", TESTNET_CONTRACT_ID: "c", TESTNET_USDC_ID: "u", SHARK_QUOTE_KEY: "k" };
+    const blank = { RATE_LIMIT_PER_MIN: "", CACHE_SECS: "", FILE_STORE_PATH: "", PUBLIC_BASE_URL: "", WEB_ORIGINS: "", TESTNET_EVENTS_URL: "", SHARK_VERSION: "" };
+    expect(loadConfig({ ...env, ...blank })).toMatchObject({ rateLimitPerMin: 30, cacheSecs: 10, fileStorePath: "./data", publicBaseUrl: "http://localhost:8787", webOrigins: ["http://localhost:3100", "http://localhost:3000"], eventsUrl: "https://api-testnet.nearblocks.io", version: "0.1.0" });
+    expect(loadConfig({ ...env, CACHE_SECS: "0", TESTNET_EVENTS_URL: "off" })).toMatchObject({ cacheSecs: 0, eventsUrl: null }); // a real 0 and "off" still count
+    expect(() => loadConfig({ ...env, SHARK_QUOTE_KEY: "" })).toThrow("SHARK_QUOTE_KEY is not set");
+  });
+});

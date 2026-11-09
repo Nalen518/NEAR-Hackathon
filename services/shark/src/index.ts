@@ -23,7 +23,7 @@ const store = openStore(config.fileStorePath);
 const now = () => Math.floor(Date.now() / 1000);
 const app = createApp({ config, chain, store, now });
 const receipts = config.eventsUrl ? nearblocksSource(config.eventsUrl, config.contractId) : undefined;
-const port = Number(process.env.PORT ?? 8787);
+const port = Number(process.env.PORT || 8787);
 serve({ fetch: app.fetch, port }, () => console.log(JSON.stringify({ level: "info", msg: "shark listening", port, network: config.networkId })));
 
 // job loop every 15 s (ARCHITECTURE §7); one tick at a time

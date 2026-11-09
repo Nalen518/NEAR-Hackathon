@@ -51,6 +51,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (!v) throw new Error(`${NET}_${name} is not set`);
     return v;
   };
+  // An empty line like `PORT=` (copied from .env.example) means "not set", so every default below uses || and not ??
+  const events = env[`${NET}_EVENTS_URL`] || (network === "testnet" ? "https://api-testnet.nearblocks.io" : "https://api.nearblocks.io");
   return {
     network,
     networkId: `near:${network}`,
@@ -60,16 +62,16 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     usdcFaucetUrl: env[`${NET}_USDC_FAUCET_URL`] || null,
     x402FacilitatorUrl: env[`${NET}_X402_FACILITATOR_URL`] || null,
     x402ApiKey: env[`${NET}_X402_API_KEY`] || null,
-    eventsUrl: (env[`${NET}_EVENTS_URL`] ?? (network === "testnet" ? "https://api-testnet.nearblocks.io" : "https://api.nearblocks.io")) === "off" ? null : (env[`${NET}_EVENTS_URL`] ?? (network === "testnet" ? "https://api-testnet.nearblocks.io" : "https://api.nearblocks.io")),
-    publicBaseUrl: (env.PUBLIC_BASE_URL ?? "http://localhost:8787").replace(/\/$/, ""),
-    webOrigins: (env.WEB_ORIGINS ?? "http://localhost:3100,http://localhost:3000").split(",").map((s) => s.trim()).filter(Boolean),
-    version: env.SHARK_VERSION ?? "0.1.0",
-    quoteKey: env.SHARK_QUOTE_KEY ?? (() => { throw new Error("SHARK_QUOTE_KEY is not set"); })(),
+    eventsUrl: events === "off" ? null : events,
+    publicBaseUrl: (env.PUBLIC_BASE_URL || "http://localhost:8787").replace(/\/$/, ""),
+    webOrigins: (env.WEB_ORIGINS || "http://localhost:3100,http://localhost:3000").split(",").map((s) => s.trim()).filter(Boolean),
+    version: env.SHARK_VERSION || "0.1.0",
+    quoteKey: env.SHARK_QUOTE_KEY || (() => { throw new Error("SHARK_QUOTE_KEY is not set"); })(),
     sharkId: env[`${NET}_SHARK_ID`] || null,
     sharkKey: env.SHARK_FN_KEY || null,
-    fileStorePath: env.FILE_STORE_PATH ?? "./data",
-    rateLimitPerMin: Number(env.RATE_LIMIT_PER_MIN ?? 30),
-    cacheSecs: Number(env.CACHE_SECS ?? 10),
+    fileStorePath: env.FILE_STORE_PATH || "./data",
+    rateLimitPerMin: Number(env.RATE_LIMIT_PER_MIN || 30),
+    cacheSecs: Number(env.CACHE_SECS || 10),
     agents: { crab: env[`${NET}_CRAB_ID`] || null, raven: env[`${NET}_RAVEN_ID`] || null, owl: env[`${NET}_OWL_ID`] || null },
     trezuUrl: env[`${NET}_TREZU_URL`] || null,
     workerUrls: Object.fromEntries(

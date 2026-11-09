@@ -23,5 +23,5 @@ const app = createFacilitatorApp({
   apiKeys: [need("X402_API_KEY")],
   policy: { network, asset: need(`${NET}_USDC_ID`), payTo: need(`${NET}_CONTRACT_ID`) },
 });
-const port = Number(env.PORT ?? 8790);
+const port = Number(env.PORT || 8790);
 serve({ fetch: app.fetch, port }, () => console.log(JSON.stringify({ level: "info", msg: "facilitator listening", port, network })));
