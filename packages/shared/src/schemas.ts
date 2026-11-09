@@ -12,7 +12,7 @@ export const QuoteId = z.string().regex(/^q_[0-9A-Z]+$/);
 export const FileId = z.string().regex(/^f_[0-9A-Z]+$/);
 export const Sha256 = z.string().regex(/^sha256:/);
 /** CAIP-2 (§0). */
-export const NearNetwork = z.enum(["near:testnet", "near:mainnet"]);
+export const NearNetwork = z.enum(["near:testnet"]);
 export const JobType = z.enum(["extract", "summary", "thread"]);
 export type JobType = z.infer<typeof JobType>;
 export const WorkerId = z.enum(["crab", "raven"]);

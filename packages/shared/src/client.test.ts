@@ -12,12 +12,17 @@ describe("network binding (API §0.3 N1)", () => {
     await expect(c.health()).resolves.toMatchObject({ network: "near:testnet" });
   });
   it("rejects a response that states the other network", async () => {
-    const c = createSharkClient("http://x", serve(fixture("company.json")), "near:mainnet");
+    const c = createSharkClient("http://x", serve(fixture("company.json")), "near:othernet");
     await expect(c.company()).rejects.toBeInstanceOf(NetworkMismatchError);
   });
   it("checks the signed quote's network on a 402", async () => {
-    const c = createSharkClient("http://x", serve(fixture("quote-402.json"), 402), "near:mainnet");
+    const c = createSharkClient("http://x", serve(fixture("quote-402.json"), 402), "near:othernet");
     await expect(c.order402({ jobType: "summary", instructions: "x", payer: "a.near" }, "k")).rejects.toBeInstanceOf(NetworkMismatchError);
+  });
+  it("names the network even when the rest of the body is for another network", async () => {
+    const other = fixture("company.json").replaceAll("near:testnet", "near:othernet");
+    const c = createSharkClient("http://x", serve(other), "near:testnet");
+    await expect(c.company()).rejects.toBeInstanceOf(NetworkMismatchError);
   });
   it("skips the check when no network is expected", async () => {
     const c = createSharkClient("http://x", serve(fixture("company.json")));

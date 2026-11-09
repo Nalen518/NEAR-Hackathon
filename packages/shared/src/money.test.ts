@@ -26,8 +26,8 @@ describe("money", () => {
 
   it("formatUsdc names test USDC on testnet", () => {
     expect(formatUsdc("1", { network: "testnet" })).toBe("1.00 test USDC");
-    expect(formatUsdc("2.000000", { network: "mainnet" })).toBe("2.00 USDC");
-    expect(formatUsdc("0.075", { network: "mainnet", unit: false })).toBe("0.075");
+    expect(formatUsdc("2.000000", { network: "testnet" })).toBe("2.00 test USDC");
+    expect(formatUsdc("0.075", { network: "testnet", unit: false })).toBe("0.075");
   });
 
   it("bpsToPct", () => {

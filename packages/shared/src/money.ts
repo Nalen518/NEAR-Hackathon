@@ -2,7 +2,8 @@
 // U128 base units (6 dp) on-chain. Never parse money into a JS number.
 
 export type Usdc = string;
-export type Network = "testnet" | "mainnet";
+/** The build is testnet only (owner, 9 Nov). */
+export type Network = "testnet";
 
 export const USDC_DECIMALS = 6;
 const SCALE = 10n ** BigInt(USDC_DECIMALS);
@@ -26,11 +27,11 @@ export function fromBase(b: bigint): Usdc {
   return `${neg ? "-" : ""}${abs / SCALE}.${frac}`;
 }
 
-/** "1" → "1.00 test USDC" on testnet, "1.00 USDC" on mainnet. `unit: false` drops the unit. */
+/** "1" → "1.00 test USDC". `unit: false` drops the unit. */
 export function formatUsdc(v: Usdc, opts: { network: Network; unit?: boolean }): string {
   const n = fromBase(toBase(v));
   if (opts.unit === false) return n;
-  return `${n} ${opts.network === "testnet" ? "test USDC" : "USDC"}`;
+  return `${n} test USDC`;
 }
 
 /** Integer bps → percent string, rounded half away from zero. 1234 → "12.34%"; signed adds "+". */

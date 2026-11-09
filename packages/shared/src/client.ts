@@ -75,10 +75,12 @@ export function createSharkClient(baseUrl: string, fetchImpl: typeof fetch = (..
       const ra = res.headers.get("Retry-After");
       throw new SharkApiError(res.status, err.data, ra && /^\d+$/.test(ra) ? Number(ra) : null);
     }
+    // The network check comes before the shape check: the schemas accept near:testnet only, so a host for another
+    // network would otherwise surface as a contract mismatch instead of the clearer network mismatch.
+    const got = statedNetwork(body);
+    if (expectNetwork && got && got !== expectNetwork) throw new NetworkMismatchError(path, expectNetwork, got);
     const parsed = schema.safeParse(body);
     if (!parsed.success) throw new ContractMismatchError(path, parsed.error.issues);
-    const got = statedNetwork(parsed.data);
-    if (expectNetwork && got && got !== expectNetwork) throw new NetworkMismatchError(path, expectNetwork, got);
     return parsed.data;
   }
 
