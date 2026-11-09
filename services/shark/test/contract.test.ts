@@ -1557,3 +1557,25 @@ describe("NearBlocks API key", () => {
     expect(seen).toEqual(["Bearer k123", null]);
   });
 });
+
+describe("event reader under a rate limit", () => {
+  it("keeps the newest receipts it got before a 429 on a transaction, and the next sync gets the rest", async () => {
+    const item = (id: string, tx: string) => ({ receipt_id: id, transaction_hash: tx, predecessor_account_id: "x.testnet", receiver_account_id: "sharkco.testnet", block: { block_timestamp: "1793500000000000000" }, actions: [{ action: "FUNCTION_CALL", method: "award" }], outcome: { status: true } });
+    const tree = (id: string, job: number) => ({ data: [{ receipt_id: id, predecessor_account_id: "x.testnet", receiver_account_id: "sharkco.testnet", actions: [{ action: "FUNCTION_CALL", method: "award", args: { args_json: { job } } }], receipts: [] }] });
+    let limited = true;
+    const f = (async (u: string) => {
+      if (u.includes("/receipts?")) return Response.json({ data: [item("N1", "T1"), item("N2", "T2")], meta: {} });
+      if (u.includes("/T2/") && limited) return new Response("{}", { status: 429 });
+      return Response.json(tree(u.includes("/T1/") ? "N1" : "N2", u.includes("/T1/") ? 1 : 2));
+    }) as unknown as typeof fetch;
+    const src = nearblocksSource("https://indexer.example", "sharkco.testnet", f);
+    expect(await syncReceipts(src, store)).toBe(1); // N1 stored, N2 waits
+    limited = false;
+    expect(await syncReceipts(src, store)).toBe(1); // N2 next time
+    expect(store.receiptsForJob(2).map((r) => r.receipt_id)).toEqual(["N2"]);
+  });
+  it("a 429 on the list itself is an error that says which call", async () => {
+    const src = nearblocksSource("https://indexer.example", "sharkco.testnet", (async () => new Response("{}", { status: 429 })) as unknown as typeof fetch);
+    await expect(src.page(null)).rejects.toThrow("indexer answered 429 on /v3/accounts/sharkco.testnet/receipts");
+  });
+});

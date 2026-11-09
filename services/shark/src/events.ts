@@ -81,15 +81,15 @@ const findReceipt = (tree: V3Receipt[], id: string): V3Receipt | undefined => {
 /**
  * NearBlocks API v3 (v1 and v2 were retired on 5 Nov 2026). The account's receipt list carries no call arguments, so for
  * a receipt Shark has not stored yet the transaction's receipt tree is read once (`/v3/txns/{hash}/receipts`).
- * shortcut: one extra request per new transaction on a keyless API; a burst of new transactions can hit its rate limit,
- * the page then fails as a whole and the next sync a minute later retries it. Use an API key beyond demo volume.
+ * One extra request per new transaction can hit NearBlocks' rate limit. Then the page stops there and returns the newest
+ * receipts it already has; the next sync a minute later picks up the rest, so a low limit slows the reader but never stalls it.
+ * `apiKey` (NearBlocks, sent as a Bearer token) lifts the keyless per IP limit, which shared hosts like Railway exhaust.
  */
-/** `apiKey` (NearBlocks, sent as a Bearer token) lifts the keyless per IP limit, which shared hosts like Railway exhaust. */
 export function nearblocksSource(baseUrl: string, account: string, fetchImpl: typeof fetch = (...a) => fetch(...a), apiKey?: string): ReceiptSource {
   const base = baseUrl.replace(/\/$/, "");
   const get = async <T>(path: string): Promise<T> => {
     const res = await fetchImpl(`${base}${path}`, { signal: AbortSignal.timeout(20_000), ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}) });
-    if (!res.ok) throw new Error(`indexer answered ${res.status}`);
+    if (!res.ok) throw Object.assign(new Error(`indexer answered ${res.status} on ${path.split("?")[0]}`), { status: res.status });
     return (await res.json()) as T;
   };
   return {
@@ -104,7 +104,12 @@ export function nearblocksSource(baseUrl: string, account: string, fetchImpl: ty
         let args: Record<string, unknown> = {};
         if (!known(t.receipt_id)) {
           if (!trees.has(tx)) trees.set(tx, get<{ data?: V3Receipt[] | V3Receipt }>(`/v3/txns/${tx}/receipts`).then((d) => (Array.isArray(d.data) ? d.data : d.data ? [d.data] : [])));
-          args = argsOf(findReceipt(await trees.get(tx)!, t.receipt_id)?.actions?.[0]);
+          const tree = await trees.get(tx)!.catch((e: { status?: number }) => {
+            if (e.status === 429) return null; // rate limited: keep what this page has so far
+            throw e;
+          });
+          if (!tree) return { receipts, next: null };
+          args = argsOf(findReceipt(tree, t.receipt_id)?.actions?.[0]);
         }
         receipts.push({
           receipt_id: t.receipt_id,
