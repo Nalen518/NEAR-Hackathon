@@ -1,7 +1,7 @@
 "use client";
-// Order page (Figma Order v2.0 150:3999, states 150:4148, mainnet pay 150:4277), on the v1 Check a call layout:
+// Order page (Figma Order v2.0 150:3999, states 150:4148), on the v1 Check a call layout:
 // numbered step cards on the left, a sticky receipt column on the right.
-import { ContractMismatchError, formatUsdc, InfeasibleDetails, NetworkMismatchError, SharkApiError, type Order, type Quote402 } from "@shark/shared";
+import { ContractMismatchError, formatUsdc, InfeasibleDetails, NetworkMismatchError, SharkApiError, type Network, type Order, type Quote402 } from "@shark/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
@@ -44,25 +44,20 @@ export function OrderFlow() {
   const href = useHref();
   const wallet = useWallet(network);
   const now = useNow();
-  const usd = network === "testnet" ? "test USDC" : "USDC";
+  const usd = "test USDC";
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const set = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
   const [phase, setPhase] = useState<Phase>({ kind: "form" });
   const [registered, setRegistered] = useState(false);
-  const [confirmMainnet, setConfirmMainnet] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
-  const [intents, setIntents] = useState({ open: false, chain: "base", refundTo: "" });
 
   const upload = useMutation({
     mutationFn: (file: File) => (file.size > 2 * 1024 * 1024 ? Promise.reject(new Error("too_large")) : client.upload(file, file.name).then((r) => ({ ...r, name: file.name }))),
     onSuccess: (r) => set({ upload: r }),
   });
   const order = useMutation({
-    mutationFn: (extra: Partial<FormState> & { payWith?: { asset: string }; refundTo?: string } = {}) => {
-      const body = { ...toRequest({ ...form, ...extra }), ...(extra.payWith ? { payWith: extra.payWith, refundTo: extra.refundTo } : {}) };
-      return client.order402(body, crypto.randomUUID());
-    },
+    mutationFn: (extra: Partial<FormState> = {}) => client.order402(toRequest({ ...form, ...extra }), crypto.randomUUID()),
     onSuccess: (r) => {
       setPayError(null);
       if (r.kind === "quote") setPhase({ kind: "quote", quote: r.quote });
@@ -74,7 +69,7 @@ export function OrderFlow() {
   const quoteStatus = useQuery({
     queryKey: ["quote", quote?.quoteId, ...key],
     queryFn: () => client.quote(quote!.quoteId),
-    enabled: phase.kind === "awaiting" || (!!quote?.intents && phase.kind === "quote"),
+    enabled: phase.kind === "awaiting",
     refetchInterval: (q) => (q.state.data?.status === "AWAITING_PAYMENT" || !q.state.data ? 5000 : false),
   });
   const orderId = quoteStatus.data?.status === "PAID" ? quoteStatus.data.orderId : null;
@@ -100,12 +95,11 @@ export function OrderFlow() {
 
   async function pay(q: Quote402) {
     setPayError(null);
-    // N3: never sign a payment for the other network or another contract.
-    if (q.pay.network !== `near:${network}`) return setPayError(`Your quote is for ${q.pay.network}. Switch the network and order again.`);
+    // N3: never sign a payment for another network or another contract.
+    if (q.pay.network !== `near:${network}`) return setPayError(`Your quote is for ${q.pay.network}, not ${network}. Nothing was sent.`);
     if (API_MODE === "live" && (!config.contract || !config.usdc)) return setPayError("This deployment's contract and token aren't configured, so the payment can't be checked. Nothing was sent.");
     if (config.contract && q.pay.args.receiver_id !== config.contract) return setPayError("The quote pays a contract this app doesn't know. Nothing was sent.");
     if (config.usdc && q.pay.token !== config.usdc) return setPayError("The quote asks for a token this app doesn't know. Nothing was sent.");
-    if (network === "mainnet" && !confirmMainnet) return setConfirmMainnet(true);
     try {
       const account = wallet.accountId ?? (await wallet.connect());
       if (account !== q.quote.payer) return setPayError(`Your wallet is ${account}, but this quote is for ${q.quote.payer}. Change the account and get a new quote.`);
@@ -130,7 +124,6 @@ export function OrderFlow() {
   const restart = () => {
     order.reset();
     setPhase({ kind: "form" });
-    setConfirmMainnet(false);
     setRegistered(false);
     setPayError(null);
   };
@@ -138,7 +131,6 @@ export function OrderFlow() {
   const step1Done = phase.kind !== "form";
   const paid = !!orderId;
   const faucet = options.data?.options.find((o) => o.method === "quote");
-  const intentsRoute = options.data?.options.filter((o) => o.method === "intents") ?? [];
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_420px] items-start gap-6 max-xl:grid-cols-[minmax(0,1fr)_344px]">
@@ -218,11 +210,11 @@ export function OrderFlow() {
 
         <Step n="03" title="Pay" done={paid} active={!!quote && !paid && secsLeft > 0}>
           {quote && !returned && (
-            <div className={cx("grid gap-5", network === "mainnet" && "grid-cols-[1fr_1fr] max-xl:grid-cols-1")}>
+            <div className="grid gap-5">
               <div className="flex flex-col gap-4 rounded-md border border-ink bg-surface-2 p-5">
                 <p className="mono-label flex items-center gap-3 text-muted">
                   <NetworkBadge />
-                  {network === "testnet" ? "// test network · no real money" : "// mainnet · real USDC"}
+                  {"// test network · no real money"}
                 </p>
                 <h3 className="display-s text-ink">
                   Pay {quote.price} {usd} with your NEAR wallet
@@ -242,11 +234,6 @@ export function OrderFlow() {
                     </Button>
                   </div>
                 )}
-                {confirmMainnet && phase.kind === "quote" && (
-                  <p role="alert" className="mono-data rounded-md border border-ink bg-surface px-4 py-3 text-ink">
-                    You are paying {quote.price} real USDC on NEAR mainnet. Press pay again to open your wallet.
-                  </p>
-                )}
                 {payError && (
                   <p role="alert" className="mono-small text-ink">
                     {payError}
@@ -256,68 +243,14 @@ export function OrderFlow() {
                   <Button arrow={false} disabled={paid || phase.kind !== "quote" || secsLeft <= 0 || (!quote.payerRegistered && !registered)} onClick={() => pay(quote)}>
                     {phase.kind === "paying" ? "Waiting for your wallet" : phase.kind === "awaiting" ? "Payment sent" : `Pay ${quote.price} ${usd}`}
                   </Button>
-                  {network === "testnet" && ((faucet && "faucet" in faucet && faucet.faucet?.url) || config.faucet) && (
+                  {((faucet && "faucet" in faucet && faucet.faucet?.url) || config.faucet) && (
                     <Button variant="ghost" href={(faucet && "faucet" in faucet && faucet.faucet?.url) || config.faucet}>
                       Get test USDC
                     </Button>
                   )}
                 </div>
-                {network === "testnet" && <p className="mono-small text-muted">Test USDC has no real value. Get it free from the faucet.</p>}
+                <p className="mono-small text-muted">Test USDC has no real value. Get it free from the faucet.</p>
               </div>
-              {network === "mainnet" && (
-                <div className="flex flex-col gap-3 rounded-md border border-line bg-surface p-5">
-                  <p className="mono-label text-muted">{"// "}optional · via NEAR Intents</p>
-                  <h3 className="display-s text-ink">Pay from another chain</h3>
-                  {quote.intents ? (
-                    <dl className="flex flex-col gap-2">
-                      {(
-                        [
-                          ["chain", quote.intents.chain],
-                          ["send", `${quote.intents.amountIn} USDC`],
-                          ["to", `${quote.intents.depositAddress.slice(0, 6)}…${quote.intents.depositAddress.slice(-4)}`],
-                          ["expires", `in ${Math.floor(secsLeft / 60)}:${String(secsLeft % 60).padStart(2, "0")}`],
-                        ] as const
-                      ).map(([k, v]) => (
-                        <div key={k} className="mono-data flex justify-between">
-                          <dt className="text-muted">{k}</dt>
-                          <dd className="text-ink">{v}</dd>
-                        </div>
-                      ))}
-                      <Button variant="ghost" arrow={false} className="w-fit" onClick={() => void navigator.clipboard?.writeText(quote.intents!.depositAddress)}>
-                        Copy address
-                      </Button>
-                    </dl>
-                  ) : (
-                    <>
-                      <label className="mono-small flex items-center justify-between text-muted">
-                        chain
-                        <select value={intents.chain} onChange={(ev) => setIntents({ ...intents, chain: ev.target.value })} className="mono-data rounded-md border border-line-strong bg-surface px-2 py-1 text-ink">
-                          {(intentsRoute.length ? intentsRoute : [{ chain: "base" }]).map((r) => (
-                            <option key={"chain" in r ? r.chain : ""}>{"chain" in r ? r.chain : ""}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="mono-small flex flex-col gap-1 text-muted">
-                        refund address on that chain
-                        <input value={intents.refundTo} onChange={(ev) => setIntents({ ...intents, refundTo: ev.target.value })} placeholder="0x…" className="mono-data rounded-md border border-line-strong bg-surface px-3 py-2 text-ink" />
-                      </label>
-                      <Button
-                        variant="ghost"
-                        arrow={false}
-                        className="w-fit"
-                        disabled={!intents.refundTo.trim() || order.isPending}
-                        onClick={() => {
-                          const route = intentsRoute.find((r) => "chain" in r && r.chain === intents.chain);
-                          order.mutate({ payWith: { asset: route && "asset" in route ? route.asset : intents.chain }, refundTo: intents.refundTo.trim() });
-                        }}
-                      >
-                        Get a deposit address
-                      </Button>
-                    </>
-                  )}
-                  <p className="mono-small text-muted">Refunds of a wrong deposit go to your refund address on that chain. Once the payment reaches the contract, refunds go to your NEAR account.</p>
-                </div>
-              )}
             </div>
           )}
           {quote && returned && (
@@ -398,7 +331,7 @@ function QuoteSummary({ quote, usd, secsLeft, paid }: { quote: Quote402; usd: st
   );
 }
 
-function WhatHappened({ order, network }: { order: Order; network: "testnet" | "mainnet" }) {
+function WhatHappened({ order, network }: { order: Order; network: Network }) {
   const rows = timelineRows({ ...order, deliveryHash: order.view === "payer" ? order.delivery?.deliveryHash : undefined }, network);
   const day = order.timeline[0]?.at;
   return (

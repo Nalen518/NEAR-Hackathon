@@ -1,5 +1,5 @@
 "use client";
-import type { Order, Quote402 } from "@shark/shared";
+import type { Network, Order, Quote402 } from "@shark/shared";
 import { checkLabel } from "@/lib/checklist";
 import { JOB_TYPE, txHref } from "../ui/agency";
 import { Coin } from "../ui/motion";
@@ -8,8 +8,8 @@ import { Button, cx, Mascot, NAME, ProofPill, Sample } from "../ui/primitives";
 /** Sticky receipt column: the job card fills in as the order progresses. */
 export type ReceiptHead = { id: string; jobType: Quote402["jobType"]; price: string; brief: { checklist: { id: string; kind: "code" | "model"; rule?: string }[]; params?: Record<string, unknown> } };
 
-export function Receipt({ quote, order, network, onRestart, note = "Sample data. Brands and accounts are placeholders." }: { quote: ReceiptHead | null; order: Order | null; network: "testnet" | "mainnet"; onRestart?: () => void; note?: string }) {
-  const usd = network === "testnet" ? "test USDC" : "USDC";
+export function Receipt({ quote, order, network, onRestart, note = "Sample data. Brands and accounts are placeholders." }: { quote: ReceiptHead | null; order: Order | null; network: Network; onRestart?: () => void; note?: string }) {
+  const usd = "test USDC";
   const brief = quote?.brief;
   const winner = order?.auction?.bids.find((b) => b.state === "winner");
   const review = order?.reviews.filter((r) => r.mode !== "complaint").at(-1);

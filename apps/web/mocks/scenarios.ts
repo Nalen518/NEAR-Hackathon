@@ -234,24 +234,8 @@ export function toPublic(o: OrderPayer): Order {
   return { ...(rest as Omit<OrderPayer, "view" | "brief">), view: "public", size: { pages: o.input.pages, words: o.input.words }, brief: { jobType: o.brief.jobType, checklist: o.brief.checklist.map(({ id, kind }) => ({ id, kind })) } };
 }
 
-// Mainnet-lite sample (DESIGN-HANDOFF §3): 4 jobs, revenue 3.20, nothing else made up beyond the Figma view.
-function companyFor(network: Network, scenario: Scenario): Company {
+function companyFor(scenario: Scenario): Company {
   const c = structuredClone(company) as Company;
-  if (network === "mainnet") {
-    c.network = "near:mainnet";
-    c.reserve = { balance: "2.80", floor: "1.90", sharkWallet: "0.44", dailyBudget: "0.60", ravenPayoutGas: { balanceEth: "0.0031", payoutsLeft: 50, warnBelow: 5 } };
-    c.pnl7d = { jobs: 4, revenue: "3.20", workers: "0.96", reviews: "0.20", referrals: "0.08", profit: "1.96", ownersPaid: "0.00", ownersAccrued: "1.18" };
-    c.strikes = { count: 0, threshold: 3 };
-    c.config = { ...c.config, dailyBudget: "0.60", reserveFloor: "1.90", changedByProposal: 1, changedAt: "2026-11-11T09:00:00Z" };
-    c.workers = c.workers.map((w) => ({ ...w, account: w.account.replace(".testnet", ".near"), jobs: 2, firstPassPct: 100, finalFails: 0, disputesWon: 0, disputesLost: 0, unresolvedOpen: 0, late: 0 }));
-    c.reviewer = { ...c.reviewer, account: "owl-reviewer.near", reviews: 4, overturned: 0 };
-    c.recentJobs = c.recentJobs.filter((j) => j.status !== "refunded");
-    c.auctions = c.auctions.filter((a) => a.outcome === "delivered");
-    c.incidents = [];
-    c.payouts = c.payouts.filter((p) => p.kind === "worker" || p.kind === "reviewer").map((p) => ({ ...p, to: p.to.replace(".testnet", ".near") }));
-    c.owners = { dao: "sharkco.sputnik-dao.near", approvalRule: "1 of 1", openProposals: [], proposals: [{ id: 1, title: "register workers and reviewer, config", status: "passed", at: "2026-11-11T09:00:00Z", votes: "1 of 1" }], ownersWaiting: "1.18", trezuUrl: "https://trezu.example/dao/sharkco-mainnet" };
-    c.guardian = { account: "guardian.sharkco.near", power: "pause only" };
-  }
   if (scenario === "incident_kinds")
     c.incidents = [
       { at: "2026-11-05T07:50:00Z", orderId: null, kind: "payout_failed", text: "Raven's payout on Base failed. Shark retries it and the fee stays held.", strike: false },
@@ -266,7 +250,7 @@ function companyFor(network: Network, scenario: Scenario): Company {
 }
 
 // ---- A tiny in-memory "chain" so the mock wallet and the mock API agree on what was paid.
-type QuoteRec = { quoteId: string; issued: number; expiresAt: number; paidAt?: number; orderId: string; payer: string; method: "quote" | "intents" };
+type QuoteRec = { quoteId: string; issued: number; expiresAt: number; paidAt?: number; orderId: string; payer: string };
 const chain = { quotes: new Map<string, QuoteRec>(), registered: new Set<string>(), complained: new Set<string>(), usedNonces: new Set<string>(), seq: 42 };
 const nextQuoteId = () => `q_01JC8Z3R9X0V4G7K2M5N8P${(chain.seq++).toString(36).toUpperCase().padStart(4, "0")}`;
 
@@ -294,19 +278,18 @@ const INFEASIBLE_DETAILS = {
   ],
 };
 
-const contractFor = (n: Network) => (n === "testnet" ? "sharkco.testnet" : "sharkco.near");
-const usdcFor = (n: Network) => (n === "testnet" ? "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af" : "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1");
+const CONTRACT = "sharkco.testnet";
+const USDC = "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
 // Sample quote per job type (DESIGN-HANDOFF §3).
 const SAMPLE_PRICE = { summary: ["0.60", "600000", "6 pages, 2 required points"], thread: ["1.20", "1200000", "5 posts, 2 must include"], extract: ["0.80", "800000", "24 records, 3 fields"] } as const;
 
 export function createMockFetch(network: Network, scenario: Scenario): typeof fetch {
   const serve = mockHandler(network, scenario);
   if (scenario !== "wrong_network") return serve;
-  // A host for the other network: every `near:<network>` in the body flips.
-  const other = network === "testnet" ? "mainnet" : "testnet";
+  // A host for another network: every `near:<network>` in the body flips to a made up one.
   return async (input, init) => {
     const res = await serve(input, init);
-    const body = (await res.text()).replaceAll(`near:${network}`, `near:${other}`);
+    const body = (await res.text()).replaceAll(`near:${network}`, "near:othernet");
     return new Response(body, { status: res.status, headers: res.headers });
   };
 }
@@ -328,15 +311,15 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
     }
 
     if (method === "POST" && path === "/v1/orders") {
-      const body = JSON.parse(String(init?.body ?? "{}")) as { jobType: keyof typeof SAMPLE_PRICE; payer: string; payWith?: { asset: string }; refundTo?: string; referrer?: string };
+      const body = JSON.parse(String(init?.body ?? "{}")) as { jobType: keyof typeof SAMPLE_PRICE; payer: string; payWith?: { asset: string }; referrer?: string };
       if (scenario === "quoting") await new Promise((r) => setTimeout(r, 6000));
       const e = ERRORS[scenario];
       if (e) return err(e[0], e[1], e[2], e[3], e[1] === "brief_infeasible" ? INFEASIBLE_DETAILS : undefined);
-      if (body.payWith && network === "testnet") return err(422, "intents_unavailable", "Paying from another chain is mainnet only.");
+      if (body.payWith) return err(422, "intents_unavailable", "Paying from another chain isn’t available.");
       const now = Date.now();
       const quoteId = nextQuoteId();
       const orderId = `j_${String(chain.seq).padStart(6, "0")}`;
-      chain.quotes.set(quoteId, { quoteId, issued: now, expiresAt: now + 600_000, orderId, payer: body.payer, method: body.payWith ? "intents" : "quote" });
+      chain.quotes.set(quoteId, { quoteId, issued: now, expiresAt: now + 600_000, orderId, payer: body.payer });
       const q = structuredClone(quote402) as Quote402;
       const [price, base, reason] = SAMPLE_PRICE[body.jobType] ?? SAMPLE_PRICE.summary;
       const p = (prices as Prices).types[body.jobType] ?? q;
@@ -351,10 +334,10 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
         expiresAt: iso(now + 600_000),
         brief: { ...q.brief, jobType: body.jobType },
         quote: { ...q.quote, quote_id: quoteId, network: `near:${network}`, job_type: body.jobType, price: base, payer: body.payer, referrer: body.referrer ?? null, expires_at: Math.floor((now + 600_000) / 1000) },
-        pay: { ...q.pay, network: `near:${network}`, token: usdcFor(network), args: { receiver_id: contractFor(network), amount: base, msg: `pay:${quoteId}` } },
+        pay: { ...q.pay, network: `near:${network}`, token: USDC, args: { receiver_id: CONTRACT, amount: base, msg: `pay:${quoteId}` } },
         payerRegistered: registered,
-        register: registered ? null : { contract: usdcFor(network), method: "storage_deposit", args: { account_id: body.payer, registration_only: true }, gas: "30000000000000", deposit: "1250000000000000000000" },
-        intents: body.payWith ? { asset: body.payWith.asset, chain: "base", amountIn: "0.604120", depositAddress: "0x9c4e00000000000000000000000000000000a841", refundTo: body.refundTo ?? "", deadline: iso(now + 600_000) } : null,
+        register: registered ? null : { contract: USDC, method: "storage_deposit", args: { account_id: body.payer, registration_only: true }, gas: "30000000000000", deposit: "1250000000000000000000" },
+        intents: null,
       });
       return json(q, 402, { "WWW-Authenticate": `SharkQuote quote_id="${quoteId}"` });
     }
@@ -363,9 +346,8 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
     if (method === "GET" && quoteMatch) {
       const q = chain.quotes.get(decodeURIComponent(quoteMatch[1]));
       if (!q) return err(400, "invalid_request", "Unknown quote.");
-      if (q.method === "intents" && !q.paidAt && Date.now() - q.issued > 8000) q.paidAt = Date.now(); // the deposit "lands"
       const status = q.paidAt ? (scenario === "returned" ? "RETURNED" : "PAID") : Date.now() > q.expiresAt ? "EXPIRED" : "AWAITING_PAYMENT";
-      return json({ quoteId: q.quoteId, method: q.method, status, orderId: status === "PAID" ? q.orderId : null, paymentTx: q.paidAt ? "SAMPLEtxPay" : null, oneClickStatus: q.method === "intents" ? (q.paidAt ? "SUCCESS" : "PENDING_DEPOSIT") : null });
+      return json({ quoteId: q.quoteId, method: "quote", status, orderId: status === "PAID" ? q.orderId : null, paymentTx: q.paidAt ? "SAMPLEtxPay" : null, oneClickStatus: null });
     }
 
     if (orderMatch) {
@@ -398,22 +380,11 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
       case "GET /v1/prices":
         return json(prices);
       case "GET /v1/company":
-        return json(companyFor(network, scenario));
+        return json(companyFor(scenario));
       case "GET /v1/health":
-        return json({ ...health, network: `near:${network}`, contract: contractFor(network), state: companyFor(network, scenario).state });
+        return json({ ...health, network: `near:${network}`, contract: CONTRACT, state: companyFor(scenario).state });
       case "GET /v1/payment-options":
-        return json(
-          network === "testnet"
-            ? paymentOptions
-            : {
-                network: "near:mainnet",
-                options: [
-                  { method: "quote", token: usdcFor("mainnet"), label: "USDC" },
-                  { method: "x402", scheme: "exact", network: "near:mainnet", asset: usdcFor("mainnet"), facilitator: "https://x402.mikedotexe.com" },
-                  { method: "intents", asset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", chain: "base", minAmountIn: "0.50", dryQuoteOk: true },
-                ],
-              },
-        );
+        return json(paymentOptions);
       default:
         return err(400, "invalid_request", `No mock for ${method} ${path}`);
     }

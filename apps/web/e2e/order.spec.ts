@@ -1,12 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Gate G-W3: fill → 402 → mock paid → job, and every state of Figma 150:4148 via ?mock=.
-async function fill(page: Page, mock = "", network = "testnet") {
+async function fill(page: Page, mock = "") {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(`/order?network=${network}${mock ? `&mock=${mock}` : ""}`);
+  await page.goto(`/order${mock ? `?mock=${mock}` : ""}`);
   await page.getByLabel("Instructions").fill("Summarise this article in 150 words or fewer. Mention NEAR Intents and fees.");
   await page.locator("#source").fill("https://example.com/blog/intents-explained");
-  await page.getByLabel("Your NEAR account").fill(network === "testnet" ? "demo-buyer.testnet" : "demo-buyer.near");
+  await page.getByLabel("Your NEAR account").fill("demo-buyer.testnet");
 }
 const getQuote = (page: Page) => page.getByRole("button", { name: "Get brief & price" }).click();
 
@@ -88,18 +88,6 @@ test("returned payment says the money came back", async ({ page }) => {
   await page.getByRole("button", { name: "Pay 0.60 test USDC" }).click();
   await expect(page.getByRole("heading", { name: "Payment returned" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("your money: 0.60 test USDC sent back to your NEAR account")).toBeVisible();
-});
-
-test("mainnet asks for one extra confirm and offers another chain", async ({ page }) => {
-  await fill(page, "", "mainnet");
-  await getQuote(page);
-  await page.getByRole("button", { name: "Pay 0.60 USDC" }).click();
-  await expect(page.getByText("You are paying 0.60 real USDC on NEAR mainnet.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Pay from another chain" })).toBeVisible();
-  await page.getByLabel("refund address on that chain").fill("0x000000000000000000000000000000000000dEaD");
-  await page.getByRole("button", { name: "Get a deposit address" }).click();
-  await expect(page.getByRole("button", { name: "Copy address" })).toBeVisible();
-  await page.screenshot({ path: "../../docs/web/screens/order-mainnet-1440.png", fullPage: true });
 });
 
 test("wrong wallet account is blocked before signing", async ({ page }) => {

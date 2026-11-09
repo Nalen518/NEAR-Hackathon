@@ -38,17 +38,16 @@ export function SystemBanner({ state, retryAfter }: { state: BannerState; retryA
   );
 }
 
-/** API §0.3 N1: the host answered for the other network. Nothing from it is shown or paid. Ink only. */
+/** API §0.3 N1: the host answered for another network. Nothing from it is shown or paid. Ink only. */
 export function NetworkMismatchBanner({ selected, got }: { selected: string; got: string }) {
-  const name = (n: string) => (n.endsWith("mainnet") ? "Mainnet" : "Testnet");
   return (
     <div role="alert" className="flex items-center gap-4 rounded-md border border-ink bg-surface-2 px-5 py-4">
       <Chip tone="solid">Wrong network</Chip>
       <div className="flex flex-1 flex-col gap-1">
         <p className="body-default text-ink">
-          This Shark host serves {name(got)}, but {name(selected)} is selected.
+          This Shark host serves {got}, not {selected}.
         </p>
-        <p className="body-small text-muted">Nothing from it is shown and nothing can be paid until they match. Switch the network or check the API address.</p>
+        <p className="body-small text-muted">Nothing from it is shown and nothing can be paid until they match. Check the API address.</p>
       </div>
       <p className="mono-small whitespace-nowrap text-muted">
         {got} ≠ {selected}

@@ -73,7 +73,7 @@ export function Sample({ show = true, className }: { show?: boolean; className?:
   return <span className={cx("mono-chip inline-flex shrink-0 items-center rounded-pill border border-line-strong px-3 py-1 text-muted", className)}>sample</span>;
 }
 
-export type ProofKind = "payment" | "worker-near" | "worker-base" | "review" | "refund" | "intents";
+export type ProofKind = "payment" | "worker-near" | "worker-base" | "review" | "refund";
 
 // Icons from Figma 27:75 / 64:56x, as used by ProofPill v2 (130:1927).
 const PROOF_ICON: Record<ProofKind, string> = {
@@ -82,7 +82,6 @@ const PROOF_ICON: Record<ProofKind, string> = {
   "worker-base": "/brand/icon-raven-base.svg",
   review: "/brand/icon-attestation.svg",
   refund: "/brand/icon-refund.svg",
-  intents: "/brand/icon-intents-payment.svg",
 };
 
 /** Every claim links to a real tx or attestation. Without href it renders as plain text (sample). */

@@ -1,5 +1,5 @@
 "use client";
-// The company v2.0 (Figma 154:3972 testnet, 154:4322 mainnet, 154:4587 system states), from GET /v1/company
+// The company v2.0 (Figma 154:3972, 154:4587 system states), from GET /v1/company
 // (v2.2 + the v2.3 proposal). Every pane says LIVE or SAMPLE from its own `sample` flag.
 import {
   addUsdc,

@@ -19,8 +19,8 @@ describe("every mock scenario speaks the API contract", () => {
     expect(orderFor("j_000042", "testnet", "ok", 0).delivery).not.toBeNull();
   });
 
-  it.each(["testnet", "mainnet"] as const)("%s: dashboard and prices parse", async (n) => {
-    const f = createMockFetch(n, "ok");
+  it("dashboard and prices parse", async () => {
+    const f = createMockFetch("testnet", "ok");
     Company.parse(await (await f("/v1/company")).json());
     Prices.parse(await (await f("/v1/prices")).json());
   });

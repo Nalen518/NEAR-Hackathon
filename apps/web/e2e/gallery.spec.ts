@@ -11,20 +11,11 @@ test("components gallery renders every v2 component", async ({ page }) => {
   await page.screenshot({ path: "../../docs/web/screens/components-v2-1440.png", fullPage: true });
 });
 
-test("network switch keeps the choice in the URL", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto("/");
-  await page.getByRole("radio", { name: "mainnet" }).click();
-  await expect(page).toHaveURL(/network=mainnet/);
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow).toBe(0);
-});
-
-// API §0.3 N1: a host for the other network is refused everywhere.
+// API §0.3 N1: a host for another network is refused everywhere.
 test("wrong network host shows a banner and blocks the order", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/company?mock=wrong_network");
-  await expect(page.getByRole("alert").filter({ hasText: "This Shark host serves Mainnet, but Testnet is selected." })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "This Shark host serves near:othernet, not near:testnet." })).toBeVisible();
   await expect(page.getByText("Live numbers unavailable. Showing sample data.")).toBeVisible();
   await page.goto("/order?mock=wrong_network");
   await page.getByLabel("Instructions").fill("Summarise this.");
@@ -44,7 +35,7 @@ test("no horizontal scroll at 1024 px", async ({ page }) => {
     const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(over, label).toBe(0);
   };
-  for (const u of ["/order", "/order?network=mainnet", "/jobs/j_000042", "/jobs/j_000042?mock=refunded", "/dev/components"]) {
+  for (const u of ["/order", "/jobs/j_000042", "/jobs/j_000042?mock=refunded", "/dev/components"]) {
     await page.goto(u);
     await check(u);
   }
@@ -52,12 +43,11 @@ test("no horizontal scroll at 1024 px", async ({ page }) => {
   await page.getByRole("button", { name: "Sign in to view" }).click();
   await expect(page.getByText("you paid for this")).toBeVisible();
   await check("job payer view");
-  await page.goto("/order?network=mainnet");
+  await page.goto("/order");
   await page.getByLabel("Instructions").fill("Summarise this.");
   await page.locator("#source").fill("https://example.com/blog/intents-explained");
-  await page.getByLabel("Your NEAR account").fill("demo-buyer.near");
+  await page.getByLabel("Your NEAR account").fill("demo-buyer.testnet");
   await page.getByRole("button", { name: "Get brief & price" }).click();
-  await expect(page.getByRole("heading", { name: "Pay from another chain" })).toBeVisible();
-  await check("order mainnet quote");
-  await page.screenshot({ path: "../../docs/web/screens/order-mainnet-1024.png", fullPage: true });
+  await expect(page.getByRole("button", { name: /^Pay / })).toBeVisible();
+  await check("order quote");
 });

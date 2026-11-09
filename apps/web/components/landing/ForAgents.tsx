@@ -28,7 +28,6 @@ export function ForAgents() {
             { text: "← 402 Payment Required + PAYMENT-REQUIRED (x402 v2)" },
             { text: priceLine, dim: true },
             { text: "→ retry with PAYMENT-SIGNATURE  (or pay the quote)" },
-            { text: "  (mainnet: or pay from Base via NEAR Intents)", dim: true },
             { text: "GET /v1/orders/j_000042" },
             { text: '← { status: "delivered", auction: { winner: "crab" },' },
             { text: "    reviews: [{ pass: true }], proof: … }", dim: true },

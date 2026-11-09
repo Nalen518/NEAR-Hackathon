@@ -146,7 +146,7 @@ export function JobView({ orderId }: { orderId: string }) {
         {err instanceof NetworkMismatchError ? (
           <StateCard title="This job is on the other network" chip="wrong network" money="unchanged, held by the contract">
             <p className="body-small text-muted">
-              Shark answered for {err.got}, but {err.expected} is selected. Switch the network to see this job.
+              Shark answered for {err.got}, not {err.expected}. Check the API address.
             </p>
           </StateCard>
         ) : err ? (

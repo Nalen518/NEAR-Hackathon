@@ -1,37 +1,15 @@
 "use client";
-import { NETWORKS, useNetwork, type Network } from "@/lib/network";
-import { cx } from "./primitives";
+import { NETWORKS, useNetwork } from "@/lib/network";
 
-const ORDER: Network[] = ["testnet", "mainnet"];
-
-/** D-149 nav switch. Ink/accent only; the selected network is always visible. */
+/** Nav badge: the build is testnet only, so the network is fixed and always visible. */
 export function NetworkSwitch() {
-  const { network, setNetwork } = useNetwork();
-  const i = ORDER.indexOf(network);
+  const { network } = useNetwork();
   return (
     <div className="flex flex-col items-end gap-1">
-      <div role="radiogroup" aria-label="Network" className="relative grid grid-cols-2 gap-0.5 rounded-pill border border-line-strong bg-surface p-1">
-        <span
-          aria-hidden
-          className="absolute inset-y-1 left-1 w-[calc(50%-5px)] rounded-pill bg-ink transition-transform duration-150 ease-out motion-reduce:transition-none"
-          style={{ transform: `translateX(${i * 100}%) translateX(${i * 2}px)` }}
-        />
-        {ORDER.map((n) => (
-          <button
-            key={n}
-            role="radio"
-            aria-checked={n === network}
-            onClick={() => setNetwork(n)}
-            className={cx(
-              "mono-chip relative z-10 flex items-center justify-center gap-1 rounded-pill px-3 py-1 transition-colors duration-150",
-              n === network ? "text-surface" : "text-muted hover:text-ink",
-            )}
-          >
-            {n === network && <span aria-hidden className="size-1.5 rounded-full bg-accent" />}
-            {n}
-          </button>
-        ))}
-      </div>
+      <span className="mono-chip flex items-center gap-1 rounded-pill bg-ink px-3 py-1 text-surface">
+        <span aria-hidden className="size-1.5 rounded-full bg-accent" />
+        {network}
+      </span>
       <p className="mono-small whitespace-nowrap text-muted">{NETWORKS[network].caption}</p>
     </div>
   );

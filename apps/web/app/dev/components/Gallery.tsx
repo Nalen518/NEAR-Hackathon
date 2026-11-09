@@ -31,7 +31,6 @@ const PROOFS: [ProofKind, string][] = [
   ["worker-base", "Raven paid on Base · Chain Signatures"],
   ["review", "Owl review · attested"],
   ["refund", "Refunded to demo-buyer.testnet"],
-  ["intents", "Paid from Base via NEAR Intents"],
 ];
 
 function Row({ title, children }: { title: string; children: ReactNode }) {
@@ -91,7 +90,7 @@ export function Gallery() {
       <Row title="DataSource · PartnerChip">
         <DataSource live />
         <DataSource live={false} />
-        <PartnerChip name="NEAR Intents" line="customers pay from any chain" />
+        <PartnerChip name="NEAR AI" line="writes the brief and does the work" />
         <PartnerChip name="OutLayer" line="Owl reviews every job in a TEE" />
       </Row>
       <Row title="NetworkSwitch · NetworkBadge">

@@ -13,27 +13,26 @@ import { Button, Mascot, ProofPill, Sample, type ProofKind } from "../ui/primiti
 // Motion spec v2.0 (155:3522), "Partner chips": hover or focus swaps the heading by typewriter.
 // [chip, heading swap, full line for screen readers]
 const PARTNERS: [string, string, string][] = [
-  ["NEAR Intents", "Pay from any chain.", "customers pay from any chain"],
   ["NEAR AI", "Writes the brief.", "writes the brief and does the work"],
   ["OutLayer", "The reviewer can’t lie.", "Owl reviews every job in a TEE"],
   ["Chain Signatures", "Pays Raven on Base.", "pays Raven on Base"],
   ["Trezu", "Profit goes to owners.", "owners set the limits and get the profit"],
 ];
 
-const ProofLinks = z.array(z.object({ kind: z.enum(["payment", "worker-near", "worker-base", "review", "refund", "intents"]), label: z.string(), href: z.url() }));
+const ProofLinks = z.array(z.object({ kind: z.enum(["payment", "worker-near", "worker-base", "review", "refund"]), label: z.string(), href: z.url() }));
 
-/** NEXT_PUBLIC_PROOF_LINKS: mainnet txs for the hero pills. Both networks link to mainnet (FR-83). */
+/** NEXT_PUBLIC_PROOF_LINKS: real testnet txs for the hero pills (the hackathon build is testnet only). */
 function proofLinks(): { kind: ProofKind; label: string; href?: string }[] {
   try {
     const parsed = ProofLinks.safeParse(JSON.parse(process.env.NEXT_PUBLIC_PROOF_LINKS || "[]"));
     if (parsed.success && parsed.data.length) return parsed.data;
   } catch {}
-  // shortcut: no mainnet txs exist before mainnet-lite, so mock mode shows the Figma pills unlinked; live mode hides them.
+  // Mock mode shows sample pills unlinked; live mode hides them until the env lists real txs.
   return API_MODE === "mock"
     ? [
-        { kind: "intents", label: "Paid 0.60 USDC from Base" },
-        { kind: "worker-base", label: "Raven paid on Base" },
-        { kind: "review", label: "Owl review · attested" },
+        { kind: "payment", label: "Paid 0.25 test USDC" },
+        { kind: "worker-near", label: "Crab paid on NEAR" },
+        { kind: "review", label: "Owl review passed" },
       ]
     : [];
 }
@@ -161,7 +160,7 @@ export function Hero() {
 
         {proofs.length > 0 && (
           <div className="absolute right-[72px] bottom-[67px] z-10 flex items-center gap-3 max-xl:right-4">
-            <span className="mono-label rounded-pill bg-ink px-3 py-1 text-surface">Proof on mainnet ↗</span>
+            <span className="mono-label rounded-pill bg-ink px-3 py-1 text-surface">Proof on testnet ↗</span>
             {proofs.map((p, i) => (
               <span key={p.label} className="anim-pop" style={{ animationDelay: `${700 + i * 90}ms` }}>
                 <ProofPill kind={p.kind} href={p.href}>

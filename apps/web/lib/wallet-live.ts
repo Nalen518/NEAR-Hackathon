@@ -27,7 +27,7 @@ function selectorFor(network: Network) {
     const net = NETWORKS[network];
     if (!net.rpc) return Promise.reject(new Error(`NEXT_PUBLIC_${network.toUpperCase()}_RPC_URL isn’t set.`));
     const explorerUrl = net.nearTx.replace(/\/txns\/$/, "");
-    // Wallet Selector wants "testnet" / "mainnet", not the CAIP-2 id ("near:testnet") the env may hold
+    // Wallet Selector wants "testnet", not the CAIP-2 id ("near:testnet")
     s = setupWalletSelector({ network: { networkId: network, nodeUrl: net.rpc, helperUrl: "", explorerUrl, indexerUrl: "" }, modules: modulesFor(network) }).then((selector) => ({
       selector,
       modal: setupModal(selector, {}),
