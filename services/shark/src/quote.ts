@@ -31,7 +31,7 @@ export function ulid(now = Date.now()): string {
 
 export type SignedQuote = {
   quote_id: string;
-  network: "near:testnet" | "near:mainnet";
+  network: "near:testnet";
   job_type: JobType;
   /** base units */
   price: string;
