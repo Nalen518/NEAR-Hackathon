@@ -1547,3 +1547,13 @@ describe("owners panel from the owners' Sputnik DAO", () => {
     expect((await parsed(Company, await get("/v1/company"))).owners.approvalRule).toBe("1 of 1");
   });
 });
+
+describe("NearBlocks API key", () => {
+  it("is sent as a Bearer token on every request when set, and not at all when not", async () => {
+    const seen: (string | null)[] = [];
+    const f = (async (_u: string, init?: RequestInit) => (seen.push(new Headers(init?.headers).get("Authorization")), Response.json({ data: [], meta: {} }))) as unknown as typeof fetch;
+    await nearblocksSource("https://indexer.example", "sharkco.testnet", f, "k123").page(null);
+    await nearblocksSource("https://indexer.example", "sharkco.testnet", f).page(null);
+    expect(seen).toEqual(["Bearer k123", null]);
+  });
+});

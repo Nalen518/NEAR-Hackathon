@@ -84,10 +84,11 @@ const findReceipt = (tree: V3Receipt[], id: string): V3Receipt | undefined => {
  * shortcut: one extra request per new transaction on a keyless API; a burst of new transactions can hit its rate limit,
  * the page then fails as a whole and the next sync a minute later retries it. Use an API key beyond demo volume.
  */
-export function nearblocksSource(baseUrl: string, account: string, fetchImpl: typeof fetch = (...a) => fetch(...a)): ReceiptSource {
+/** `apiKey` (NearBlocks, sent as a Bearer token) lifts the keyless per IP limit, which shared hosts like Railway exhaust. */
+export function nearblocksSource(baseUrl: string, account: string, fetchImpl: typeof fetch = (...a) => fetch(...a), apiKey?: string): ReceiptSource {
   const base = baseUrl.replace(/\/$/, "");
   const get = async <T>(path: string): Promise<T> => {
-    const res = await fetchImpl(`${base}${path}`, { signal: AbortSignal.timeout(20_000) });
+    const res = await fetchImpl(`${base}${path}`, { signal: AbortSignal.timeout(20_000), ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}) });
     if (!res.ok) throw new Error(`indexer answered ${res.status}`);
     return (await res.json()) as T;
   };
