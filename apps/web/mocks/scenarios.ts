@@ -373,7 +373,7 @@ function mockHandler(network: Network, scenario: Scenario): typeof fetch {
       const q = [...chain.quotes.values()].find((x) => x.orderId === id && x.paidAt);
       if (chain.complained.has(id)) scenario = "complaint_review";
       // A fresh order walks its steps live; any other id shows the scenario's end state.
-      const o = q ? orderFor(id, network, scenario === DELIVERED ? "ok" : scenario, q.paidAt!, 1 + Math.floor((Date.now() - q.paidAt!) / 2500)) : orderFor(id, network, scenario, Date.parse("2026-11-05T08:13:02Z"));
+      const o = q ? orderFor(id, network, scenario === DELIVERED ? "ok" : scenario, q.paidAt!, 1 + Math.floor((Date.now() - q.paidAt!) / 2500)) : orderFor(id, network, scenario, Date.now() - 3_600_000); // an hour ago, so the 24 h complaint window is open on any day
       if (method === "GET" && !sub) return json(toPublic(o));
       if (method === "POST" && sub === "/view") {
         const auth = JSON.parse(String(init?.body ?? "{}")) as { message?: string; accountId?: string; nonce?: string };
