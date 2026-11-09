@@ -22,7 +22,8 @@ export type StoredReceipt = {
 
 export type ReceiptSource = {
   /** Newest first. `cursor` continues from the previous page. */
-  page(cursor: string | null): Promise<{ receipts: StoredReceipt[]; next: string | null }>;
+  /** `known` receipts are returned without their arguments, which saves a request for each. */
+  page(cursor: string | null, known?: (receiptId: string) => boolean): Promise<{ receipts: StoredReceipt[]; next: string | null }>;
 };
 
 /** A payment the contract received that no job came out of, long enough ago that the token has given it back (FR-06). */
@@ -48,47 +49,74 @@ export function classify(method: string, args: Record<string, unknown>): { job: 
   return { job: typeof args.job === "number" ? args.job : null, quote: null };
 }
 
-type NearblocksReceipt = {
+type V3Action = { action: string; method?: string; args?: { args_json?: Record<string, unknown> | null; args_base64?: string | null } | null };
+type V3Receipt = {
   receipt_id: string;
-  transaction_hash: string;
+  transaction_hash?: string;
   predecessor_account_id: string;
   receiver_account_id: string;
-  block_timestamp: string;
-  actions?: { action: string; method?: string; args?: string | null }[];
-  outcomes?: { status?: boolean };
+  block?: { block_timestamp: string };
+  included_in_block_timestamp?: string;
+  actions?: V3Action[];
+  outcome?: { status?: boolean };
+  receipts?: V3Receipt[];
 };
 
-/** NearBlocks API v1: `GET /v1/account/{id}/receipts?order=desc&per_page=25[&cursor=...]`. Needs no key at low volume. */
+const argsOf = (a?: V3Action): Record<string, unknown> => {
+  if (a?.args?.args_json && typeof a.args.args_json === "object") return a.args.args_json;
+  try {
+    return a?.args?.args_base64 ? (JSON.parse(Buffer.from(a.args.args_base64, "base64").toString("utf8")) as Record<string, unknown>) : {};
+  } catch {
+    return {}; // arguments that are not JSON (a raw call) carry nothing we use
+  }
+};
+
+const findReceipt = (tree: V3Receipt[], id: string): V3Receipt | undefined => {
+  for (const r of tree) {
+    const hit = r.receipt_id === id ? r : findReceipt(r.receipts ?? [], id);
+    if (hit) return hit;
+  }
+};
+
+/**
+ * NearBlocks API v3 (v1 and v2 were retired on 5 Nov 2026). The account's receipt list carries no call arguments, so for
+ * a receipt Shark has not stored yet the transaction's receipt tree is read once (`/v3/txns/{hash}/receipts`).
+ * shortcut: one extra request per new transaction on a keyless API; a burst of new transactions can hit its rate limit,
+ * the page then fails as a whole and the next sync a minute later retries it. Use an API key beyond demo volume.
+ */
 export function nearblocksSource(baseUrl: string, account: string, fetchImpl: typeof fetch = (...a) => fetch(...a)): ReceiptSource {
+  const base = baseUrl.replace(/\/$/, "");
+  const get = async <T>(path: string): Promise<T> => {
+    const res = await fetchImpl(`${base}${path}`, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) throw new Error(`indexer answered ${res.status}`);
+    return (await res.json()) as T;
+  };
   return {
-    async page(cursor) {
-      const url = `${baseUrl.replace(/\/$/, "")}/v1/account/${account}/receipts?order=desc&per_page=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-      const res = await fetchImpl(url, { signal: AbortSignal.timeout(20_000) });
-      if (!res.ok) throw new Error(`indexer answered ${res.status}`);
-      const body = (await res.json()) as { cursor?: string; txns?: NearblocksReceipt[] };
-      const receipts = (body.txns ?? []).flatMap((t): StoredReceipt[] => {
+    async page(cursor, known = () => false) {
+      const body = await get<{ data?: V3Receipt[]; meta?: { next_page?: string | null } }>(`/v3/accounts/${account}/receipts?limit=25${cursor ? `&next=${encodeURIComponent(cursor)}` : ""}`);
+      const trees = new Map<string, Promise<V3Receipt[]>>(); // one detail request per transaction
+      const receipts: StoredReceipt[] = [];
+      for (const t of body.data ?? []) {
         const a = t.actions?.[0];
-        if (t.receiver_account_id !== account || a?.action !== "FUNCTION_CALL" || !a.method) return [];
+        if (t.receiver_account_id !== account || a?.action !== "FUNCTION_CALL" || !a.method || !t.transaction_hash) continue;
+        const tx = t.transaction_hash;
         let args: Record<string, unknown> = {};
-        try {
-          args = a.args ? (JSON.parse(a.args) as Record<string, unknown>) : {};
-        } catch {
-          // arguments that are not JSON (a raw call) carry nothing we use
+        if (!known(t.receipt_id)) {
+          if (!trees.has(tx)) trees.set(tx, get<{ data?: V3Receipt[] | V3Receipt }>(`/v3/txns/${tx}/receipts`).then((d) => (Array.isArray(d.data) ? d.data : d.data ? [d.data] : [])));
+          args = argsOf(findReceipt(await trees.get(tx)!, t.receipt_id)?.actions?.[0]);
         }
-        return [
-          {
-            receipt_id: t.receipt_id,
-            tx: t.transaction_hash,
-            method: a.method,
-            ok: t.outcomes?.status === true,
-            at: Math.floor(Number(BigInt(t.block_timestamp) / 1_000_000_000n)),
-            predecessor: t.predecessor_account_id,
-            args,
-            ...classify(a.method, args),
-          },
-        ];
-      });
-      return { receipts, next: body.cursor ?? null };
+        receipts.push({
+          receipt_id: t.receipt_id,
+          tx,
+          method: a.method,
+          ok: t.outcome?.status === true,
+          at: Math.floor(Number(BigInt(t.block?.block_timestamp ?? t.included_in_block_timestamp ?? "0") / 1_000_000_000n)),
+          predecessor: t.predecessor_account_id,
+          args,
+          ...classify(a.method, args),
+        });
+      }
+      return { receipts, next: body.meta?.next_page ?? null };
     },
   };
 }
@@ -98,7 +126,7 @@ export async function syncReceipts(source: ReceiptSource, store: Store, maxPages
   let fresh = 0;
   let cursor: string | null = null;
   for (let i = 0; i < maxPages; i++) {
-    const { receipts, next } = await source.page(cursor);
+    const { receipts, next } = await source.page(cursor, (id) => store.hasReceipt(id));
     const added = receipts.filter((r) => store.putReceipt(r)).length;
     fresh += added;
     if (added < receipts.length || !next || !receipts.length) break;

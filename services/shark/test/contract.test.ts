@@ -1016,23 +1016,45 @@ describe("event reader", () => {
   const payMsg = (quoteId: string) => `pay:${Buffer.from(JSON.stringify({ quote: { quote_id: quoteId }, sig: "ed25519:x" })).toString("base64")}`;
 
   describe("source", () => {
-    const entry = (over: Record<string, unknown>) => ({
-      id: "1", receipt_id: "R1", transaction_hash: "TX1", predecessor_account_id: USDC, receiver_account_id: "sharkco.testnet", block_timestamp: "1793500000123456789",
-      actions: [{ action: "FUNCTION_CALL", method: "ft_on_transfer", args: JSON.stringify({ sender_id: "demo-buyer.testnet", amount: "600000", msg: payMsg("q_A") }) }],
-      outcomes: { status: true }, ...over,
+    // NearBlocks v3 shapes (checked against the testnet API on 9 Nov 2026): the list has no arguments, the tx detail has them
+    const item = (over: Record<string, unknown>) => ({
+      receipt_id: "R1", transaction_hash: "TX1", predecessor_account_id: USDC, receiver_account_id: "sharkco.testnet",
+      block: { block_hash: "B", block_height: "1", block_timestamp: "1793500000123456789" }, included_in_block_timestamp: "1793500000123456789",
+      actions: [{ action: "FUNCTION_CALL", method: "ft_on_transfer" }], outcome: { status: true }, ...over,
     });
-    it("parses the indexer's receipts and keeps only calls to the contract", async () => {
+    const call = (receipt_id: string, method: string, args_json: Record<string, unknown> | null, args_base64: string | null = null, receipts: unknown[] = []) => ({
+      receipt_id, predecessor_account_id: "x.testnet", receiver_account_id: "sharkco.testnet", block: { block_timestamp: "1793500000123456789" },
+      actions: [{ action: "FUNCTION_CALL", method, args: { gas: 1, deposit: "0", args_json, args_base64, method_name: method } }], outcome: { status: true }, receipts,
+    });
+    const indexer = (urls: string[], list: unknown, trees: Record<string, unknown>) =>
+      (async (u: string) => {
+        urls.push(u);
+        const tx = /\/v3\/txns\/([^/]+)\/receipts/.exec(u)?.[1];
+        if (tx) return trees[tx] ? Response.json({ data: [trees[tx]] }) : new Response("{}", { status: 404 });
+        return Response.json(list);
+      }) as unknown as typeof fetch;
+
+    it("reads the v3 list, takes each call's arguments from its transaction, and keeps only calls to the contract", async () => {
       const urls: string[] = [];
-      const body = { cursor: "c2", txns: [
-        entry({}),
-        entry({ receipt_id: "R2", transaction_hash: "TX2", actions: [{ action: "FUNCTION_CALL", method: "deliver", args: JSON.stringify({ job: 7, delivery_hash: "sha256:d" }) }], outcomes: { status: false } }),
-        entry({ receipt_id: "R3", receiver_account_id: "someone.testnet" }), // not ours
-        entry({ receipt_id: "R4", actions: [{ action: "TRANSFER" }] }), // not a call
-        entry({ receipt_id: "R5", actions: [{ action: "FUNCTION_CALL", method: "pause", args: "not json" }] }),
+      const list = { meta: { next_page: "c2" }, data: [
+        item({}),
+        item({ receipt_id: "R2", transaction_hash: "TX2", actions: [{ action: "FUNCTION_CALL", method: "deliver" }], outcome: { status: false } }),
+        item({ receipt_id: "R3", receiver_account_id: "someone.testnet" }), // not ours
+        item({ receipt_id: "R4", actions: [{ action: "TRANSFER" }] }), // not a call
+        item({ receipt_id: "R5", actions: [{ action: "FUNCTION_CALL", method: "pause" }] }), // same tx as R1, args not JSON
       ] };
-      const src = nearblocksSource("https://indexer.example/", "sharkco.testnet", (async (u: string) => (urls.push(u), Response.json(body))) as unknown as typeof fetch);
+      const trees = {
+        // R1 is a nested receipt: the buyer's ft_transfer_call on the token, then ft_on_transfer on the contract
+        TX1: call("T1", "ft_transfer_call", { receiver_id: "sharkco.testnet" }, null, [
+          call("R1", "ft_on_transfer", { sender_id: "demo-buyer.testnet", amount: "600000", msg: payMsg("q_A") }),
+          call("R5", "pause", null, Buffer.from("not json").toString("base64")),
+        ]),
+        TX2: call("R2", "deliver", null, Buffer.from(JSON.stringify({ job: 7, delivery_hash: "sha256:d" })).toString("base64")),
+      };
+      const src = nearblocksSource("https://indexer.example/", "sharkco.testnet", indexer(urls, list, trees));
       const page = await src.page(null);
-      expect(urls[0]).toBe("https://indexer.example/v1/account/sharkco.testnet/receipts?order=desc&per_page=25");
+      expect(urls[0]).toBe("https://indexer.example/v3/accounts/sharkco.testnet/receipts?limit=25");
+      expect(urls.filter((u) => u.includes("/v3/txns/")).sort()).toEqual(["https://indexer.example/v3/txns/TX1/receipts", "https://indexer.example/v3/txns/TX2/receipts"]); // TX1 once for R1 and R5
       expect(page.next).toBe("c2");
       expect(page.receipts.map((r) => [r.receipt_id, r.tx, r.method, r.ok, r.at, r.job, r.quote])).toEqual([
         ["R1", "TX1", "ft_on_transfer", true, 1_793_500_000, null, "q_A"],
@@ -1040,7 +1062,20 @@ describe("event reader", () => {
         ["R5", "TX1", "pause", true, 1_793_500_000, null, null],
       ]);
       await src.page("c2");
-      expect(urls[1]).toContain("&cursor=c2");
+      expect(urls).toContain("https://indexer.example/v3/accounts/sharkco.testnet/receipts?limit=25&next=c2");
+    });
+    it("asks for no transaction detail when the receipt is already known, and a failed detail fails the whole page", async () => {
+      const urls: string[] = [];
+      const list = { meta: { next_page: null }, data: [item({})] };
+      const src = nearblocksSource("https://indexer.example", "sharkco.testnet", indexer(urls, list, {}));
+      const known = await src.page(null, (id) => id === "R1");
+      expect(known.receipts.map((r) => [r.receipt_id, r.args])).toEqual([["R1", {}]]);
+      expect(urls.some((u) => u.includes("/v3/txns/"))).toBe(false);
+      await expect(src.page(null)).rejects.toThrow("indexer answered 404"); // nothing half stored; the next sync retries
+    });
+    it("a retired API answer (410) is an error the loop logs", async () => {
+      const src = nearblocksSource("https://indexer.example", "sharkco.testnet", (async () => new Response("{}", { status: 410 })) as unknown as typeof fetch);
+      await expect(src.page(null)).rejects.toThrow("indexer answered 410");
     });
     it("finds the job or quote a call belongs to", () => {
       expect(classify("ft_on_transfer", { msg: "escrow:12" })).toEqual({ job: 12, quote: null });

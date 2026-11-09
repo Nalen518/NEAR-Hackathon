@@ -113,6 +113,7 @@ export function openStore(dir: string) {
           .prepare("insert or ignore into receipts values (?,?,?,?,?,?,?,?,?)")
           .run(r.receipt_id, r.tx, r.method, r.ok ? 1 : 0, r.at, r.predecessor, JSON.stringify(r.args), r.job, r.quote).changes,
       ) > 0,
+    hasReceipt: (id: string) => !!db.prepare("select 1 from receipts where receipt_id = ?").get(id),
     /** Oldest first: the calls about this job. */
     receiptsForJob: (job: number) => (db.prepare("select * from receipts where job = ? order by at, rowid").all(job) as ReceiptRow[]).map(toReceipt),
     /** The payment that carried this quote (ft_on_transfer with pay:), if the contract received one. */
