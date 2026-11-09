@@ -9,6 +9,7 @@
   "owl": "REPLACE-owl-reviewer.testnet",
   "buyer": "REPLACE-demo-buyer.testnet",
   "usdc": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+  "legacyKeychain": [],
   "quotePublicKey": "REPLACE-ed25519:public-key-of-SHARK_QUOTE_KEY",
   "publicKeys": {
     "wallet": "REPLACE-ed25519:public-key-of-SHARK_WALLET_KEY",

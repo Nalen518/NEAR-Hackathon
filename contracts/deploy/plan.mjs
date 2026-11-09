@@ -62,23 +62,26 @@ const SEED = "16100000"; // 16.10 test USDC: the reserve floor (12.10) plus one 
 const newArgs = write("new.args.json", { owner: a.owner, guardian: a.guardian, shark: a.shark, shark_wallet: a.wallet, quote_pubkey: a.quotePublicKey, usdc: a.usdc, network: "near:testnet", config });
 const empty = write("empty.args.json", {});
 
-const KEYCHAIN = "network-config testnet sign-with-legacy-keychain send";
-const call = (contract, method, file, gas, deposit, signer) => `near contract call-function as-transaction ${contract} ${method} file-args ${file} prepaid-gas '${gas}' attached-deposit '${deposit}' sign-as ${signer} ${KEYCHAIN}`;
-const addKey = (account, methods, pk) => `near account add-key ${account} grant-function-call-access --allowance '1 NEAR' --contract-account-id ${a.contract} --function-names '${methods}' use-manually-provided-public-key ${pk} ${KEYCHAIN}`;
+// Accounts made with `near account create-account ... save-to-keychain` keep their key in the OS keychain (Windows Credential
+// Manager); older ones are in ~/.near-credentials. accounts.local.json lists the old ones in `legacyKeychain`.
+const legacy = new Set(a.legacyKeychain ?? []);
+const via = (who) => `network-config testnet ${legacy.has(who) ? "sign-with-legacy-keychain" : "sign-with-keychain"} send`;
+const call = (contract, method, file, gas, deposit, signer) => `near contract call-function as-transaction ${contract} ${method} file-args ${file} prepaid-gas '${gas}' attached-deposit '${deposit}' sign-as ${signer} ${via(signer)}`;
+const addKey = (account, methods, pk) => `near account add-key ${account} grant-function-call-access --allowance '1 NEAR' --contract-account-id ${a.contract} --function-names '${methods}' use-manually-provided-public-key ${pk} ${via(account)}`;
 
 const registered = [a.contract, a.wallet, a.crab, a.raven, a.owl, a.buyer, a.owner];
 const steps = [
   ["1. Keys for the services (limited to their own methods, except the wallet which pays escrow and gas; the secret halves are in the .env files)", [
     addKey(a.shark, "award,complain,mark_refund_due,mark_paid_x402,return_x402", a.publicKeys.shark),
-    `near account add-key ${a.wallet} grant-full-access use-manually-provided-public-key ${a.publicKeys.wallet} ${KEYCHAIN}`,
+    `near account add-key ${a.wallet} grant-full-access use-manually-provided-public-key ${a.publicKeys.wallet} ${via(a.wallet)}`,
     addKey(a.crab, "deliver,dispute", a.publicKeys.crab),
     addKey(a.raven, "deliver,dispute", a.publicKeys.raven),
     addKey(a.owl, "on_review", a.publicKeys.owl),
   ]],
   ["2. Deploy the company contract and run `new` (one transaction)", [
-    `near contract deploy ${a.contract} use-file contracts/company/target/near/company.wasm with-init-call new file-args ${newArgs} prepaid-gas '100 Tgas' attached-deposit '0 NEAR' ${KEYCHAIN}`,
+    `near contract deploy ${a.contract} use-file contracts/company/target/near/company.wasm with-init-call new file-args ${newArgs} prepaid-gas '100 Tgas' attached-deposit '0 NEAR' ${via(a.contract)}`,
   ]],
-  ["3. Give the contract a little NEAR (it pays the USDC storage for refunds)", [`near tokens ${a.owner} send-near ${a.contract} '1 NEAR' ${KEYCHAIN}`]],
+  ["3. Give the contract a little NEAR (it pays the USDC storage for refunds)", [`near tokens ${a.owner} send-near ${a.contract} '1 NEAR' ${via(a.owner)}`]],
   ["4. Register every USDC receiver on the token (0.00125 NEAR each, paid by the owner)", registered.map((who) => call(a.usdc, "storage_deposit", write(`storage-${who}.json`, { account_id: who, registration_only: true }), "30 Tgas", "0.00125 NEAR", a.owner))],
   ["5. Register the workers and the reviewer (owner only)", [
     call(a.contract, "register_worker", write("register-crab.json", { id: a.crab, types: ["extract", "summary", "thread"], min_fees: ["100000", "60000", "120000"] }), "100 Tgas", "0 NEAR", a.owner),
