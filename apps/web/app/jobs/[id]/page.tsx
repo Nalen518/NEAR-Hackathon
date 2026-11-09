@@ -5,17 +5,24 @@ import { JobView } from "@/components/job/JobView";
 
 export const metadata = { title: "Job · Shark & Co." };
 
-export default async function JobPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+type Params = Promise<{ id: string }>;
+
+// The job id is URL data, so it is read inside <Suspense> (Next 16 Cache Components: the shell stays instant).
+export default function JobPage({ params }: { params: Params }) {
   return (
     <>
       <Nav />
       <main>
         <Suspense>
-          <JobView orderId={id} />
+          <Job params={params} />
         </Suspense>
       </main>
       <Footer />
     </>
   );
+}
+
+async function Job({ params }: { params: Params }) {
+  const { id } = await params;
+  return <JobView orderId={id} />;
 }
