@@ -83,8 +83,8 @@ export async function signMessage(network: Network, message: string): Promise<Si
   const recipient = NETWORKS[network].contract;
   if (!recipient) throw new Error("The contract id isn’t set for this network.");
   const nonce = crypto.getRandomValues(new Uint8Array(32));
-  // The wallets read the nonce as bytes (Array.from), so a Uint8Array works without a Buffer polyfill.
-  const res = await wallet.signMessage({ message, recipient, nonce: nonce as unknown as Buffer });
+  // Wallet Selector core rejects anything but a real Buffer (Buffer.isBuffer); the bundler provides Buffer in the browser.
+  const res = await wallet.signMessage({ message, recipient, nonce: Buffer.from(nonce) });
   if (!res) throw new Error("The wallet didn’t return a signature. Nothing was shared.");
   return { accountId: res.accountId, publicKey: res.publicKey, signature: res.signature, message, nonce: btoa(String.fromCharCode(...nonce)), recipient };
 }
