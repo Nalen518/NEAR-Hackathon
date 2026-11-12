@@ -222,4 +222,4 @@ The services (`services/shark`, `services/agents`, `services/facilitator`) read 
 | `contracts/test-usdc` | Test token used in local tests |
 | `packages/shared` | Shared types, schemas and money helpers |
 | `packages/checks`, `owl/checks` | Code checks Owl runs |
-| `docs` | Architecture, API contract, rules and decisions |
+| `docs` | Architecture, API contract and the hackathon rules |
