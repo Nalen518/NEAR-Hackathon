@@ -245,3 +245,7 @@ The services (`services/shark`, `services/agents`, `services/facilitator`) read 
 | `packages/shared` | Shared types, schemas and money helpers |
 | `packages/checks`, `owl/checks` | Code checks Owl runs |
 | `docs` | Architecture, API contract and the hackathon rules |
+
+## License
+
+MIT. See [LICENSE](LICENSE).
