@@ -22,23 +22,26 @@ refunds you automatically.
 | API health | https://shark-production-776f.up.railway.app/v1/health |
 | Company contract | [`sharkco.testnet`](https://testnet.nearblocks.io/address/sharkco.testnet) |
 | Owners DAO (Sputnik, managed in Trezu) | [`sharkco-owners.sputnikv2.testnet`](https://testnet.nearblocks.io/address/sharkco-owners.sputnikv2.testnet) |
-| Demo post on X (video, 2:15) | _link added when the post is up_ |
+| Demo post on X (video, 2:14) | _link added when the post is up_ |
 
 ## Demo video
 
-The video follows one real order, job `j_000006`, from start to payout:
+2:14 long. Times are the real scene starts in the cut. From 0:24 it shows the live app: screen recordings of job `j_000006`, with four moments (price, auction, review, payouts) rebuilt larger from those same screens so they read on a phone. The refund rule at 1:24 is an animation; a real refund is linked under Proof on testnet.
 
-| Time | Chapter |
+| Time | What you see |
 | --- | --- |
 | 0:00 | The problem: who checks, pays and refunds AI work? |
-| 0:25 | 01 · Order: Shark turns the request into a brief that can be checked, and prices it |
-| 0:37 | 02 · Pay: test USDC goes into the NEAR contract, not to the AI |
-| 0:47 | 03 · Auction: Crab and Raven send signed bids, Crab wins at 0.122 |
-| 0:58 | 04 · Review: Owl runs 4 code checks and 2 model checks, all pass |
-| 1:13 | 05 · Payout: the contract pays Crab and Owl, then the owners after the complaint window |
-| 1:25 | The rules: fail twice and the payer is refunded; strikes cage a misbehaving agent |
-| 1:39 | For agents: the same order paid with x402 in one HTTP call |
-| 1:45 | Proof: the receipt, the transaction on nearblocks, the `/company` dashboard |
+| 0:15 | Meet Shark, and the agents: Crab and Raven work, Owl checks |
+| 0:24 | 01 · Order: a thread job is entered on `/order`; Shark writes a checkable brief and prices it at 1.05 test USDC |
+| 0:36 | 02 · Pay: the Meteor wallet sends 1.05 test USDC into the NEAR contract |
+| 0:46 | 03 · Auction: job `j_000006` opens; Crab bids 0.122 and Raven 0.184, Crab wins |
+| 0:58 | 04 · Review: Owl runs 4 code checks and 2 AI checks, all pass; the payer reads the 5 posts |
+| 1:12 | 05 · Payout: the contract pays Crab 0.122 and Owl 0.05 on the pass, then the owners and reserve after the complaint window |
+| 1:24 | The refund rule: one revision, then the payer gets the money back |
+| 1:32 | The owners' rules on the landing page, and the strike meter that cages an agent |
+| 1:38 | For agents: a separate order, `j_000007`, paid by a script with x402 in one HTTP call |
+| 1:44 | Proof: the receipt, a transaction on nearblocks, and the `/company` dashboard |
+| 2:04 | Order a job at sharkco.vercel.app |
 
 ## Try it (for judges)
 
