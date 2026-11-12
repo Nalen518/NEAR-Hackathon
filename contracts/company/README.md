@@ -2,11 +2,15 @@
 
 Holds every customer payment, runs the job state machine and pays workers, Owl, referrers and the owners (API-CONTRACT §3, SRD §8).
 
-This first slice covers method 1 payments (signed quote + `ft_transfer_call`), award and escrow, deliveries, reviews posted by Owl's account, one revision, refunds, complaints, strikes and the cage, and `finalize` with the revenue split. Disputes, Unresolved, x402, Intents, Chain Signatures and the DAO come next.
+It covers payments by signed quote (`ft_transfer_call`) and by x402 (`mark_paid_x402`), award and escrow, deliveries, reviews posted by Owl's account, one revision, disputes decided by a second model, Unresolved jobs, refunds, complaints, strikes and the cage, `finalize` with the revenue split, owner rules set by the DAO (`set_config`, `set_owner`) and `wind_down`. Not built yet: payouts through Chain Signatures and payments through NEAR Intents.
+
+The 76 unit tests (`src/tests.rs`, a mocked VM, no network):
 
 ```bash
-cargo test
+cargo test --lib
 ```
+
+Use `--lib`: plain `cargo test` on Linux also runs the sandbox tests below, which need the wasm files built first and Docker.
 
 ```bash
 cargo near build non-reproducible-wasm --no-abi

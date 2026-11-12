@@ -102,6 +102,18 @@ The demo video shows a thread because it is the easiest result to read on screen
 | Proof of what happened | None | The platform's own records | A NEAR transaction for every step |
 | Usable by another agent | With an API key | No | x402, one HTTP call |
 
+## Why these three tracks
+
+Shark & Co. is one product that sits where three tracks meet. What each track asks for, and the part of the project that answers it:
+
+| Track | What the track asks for | What we built for it | Where |
+| --- | --- | --- | --- |
+| `business` · Autonomous Business | An AI-native business with treasury, sales, procurement and revenue sharing, where humans only set the constraints | Shark sells (writes the brief, prices the job, signs the quote), buys work by auction from worker agents, and the contract splits every job's revenue between the worker, the reviewer, a referrer, the owners and a reserve. The owners never run jobs: they only set price bands, the worker cap, budgets and the strike limit through a Sputnik DAO managed in Trezu | `services/shark`, `contracts/company`, owners DAO `sharkco-owners.sputnikv2.testnet` |
+| `agents` · Agent Economy | Agents that earn, spend, hire other agents and pay for services | Crab and Raven earn by bidding for jobs with their own NEAR accounts and signed prices. Shark hires them; Owl earns a fee for every review. A buyer agent orders and pays in one HTTP call with x402, no wallet popup and no gas | `services/agents`, `services/facilitator`, `services/shark/src/x402.ts` |
+| `security` · AI Security & Defense | Spending limits, policy engines, sandboxed wallets and reputation, so AI can hold money without the keys to everything | The contract enforces the limits on every agent, Shark included: quotes outside the owners' band and fees over the worker cap are rejected, Shark's wallet is topped up by at most the daily budget, and the guardian can pause but never move money. Money is released only after deterministic code checks pass. Agents that fail get strikes, then the cage. Workers see only the brief and a snapshot of the source, never the buyer's free text, so a prompt in the order can't steer them | `contracts/company/src/lib.rs`, `packages/checks`, `services/shark/src/brief.ts`, `services/shark/src/input.ts` |
+
+The track hints we do not use yet are listed honestly under [What uses NEAR](#what-uses-near): NEAR Intents, Chain Signatures and a TEE attestation for Owl.
+
 ## Proof on testnet
 
 Job [`j_000006`](https://sharkco.vercel.app/jobs/j_000006), the one in the video (an X thread, 1.05 test USDC):
@@ -113,6 +125,8 @@ Job [`j_000006`](https://sharkco.vercel.app/jobs/j_000006), the one in the video
 | 16:59:04 Crab delivered for review (delivery hash on chain) | [`4ckSHy…aweyg`](https://testnet.nearblocks.io/txns/4ckSHyBnEt4iPiq88GPdVJbhRh8yufYLLTr7LJUaweyg) |
 | 16:59:14 Owl passed it, 6 of 6 checks; Crab paid 0.122 and Owl 0.05 | [`CmFaca…LMcNG`](https://testnet.nearblocks.io/txns/CmFacaGeQywkbBXkAkRNj5YQTNxbt2kfDmw81QELMcNG) |
 | 17:04:29 Complaint window closed; owners and reserve paid | [`B5ao5v…CNULH`](https://testnet.nearblocks.io/txns/B5ao5vvTGeckH1AWrXTEtGAJ9HJGusjKtfzM8SrCNULH) |
+
+Checking from a script: testnet.nearblocks.io pages refuse automated requests (403), but the NearBlocks API answers. For example, `curl https://api-testnet.nearblocks.io/v3/txns/HJurmooeCHC2y4rzKSY85VPAne6NVmteruDQoVYiZjYT` shows the signer, the receiver and `"status": true`. The jobs themselves are at `https://shark-production-776f.up.railway.app/v1/orders/j_000006`.
 
 More from the last 7 days, as of 12 Nov 2026 ([`/company`](https://sharkco.vercel.app/company)): 8 jobs, 3.05 test USDC revenue, 0.554 paid to workers, 0.35 to the reviewer.
 
@@ -203,9 +217,17 @@ Needs Node 24+ and pnpm 11.
 
 ```sh
 pnpm install
-pnpm test          # all packages
+pnpm test          # all packages: 283 tests
 pnpm dev           # the web app on http://localhost:3100
 ```
+
+The contract's 76 unit tests need Rust 1.93 (pinned in `rust-toolchain.toml`). On Windows, add NASM to `PATH` first:
+
+```sh
+cd contracts/company && cargo test --lib
+```
+
+The sandbox tests (`contracts/company/tests/sandbox.rs`, the real wasm on a local NEAR node) run in Docker; see `contracts/company/README.md`.
 
 Set `NEXT_PUBLIC_API_MODE=mock` in `apps/web/.env.local` to run the web app on sample data with no backend.
 The services (`services/shark`, `services/agents`, `services/facilitator`) read their settings from `.env` files; each has a `.env.example`. Never commit the real ones.
