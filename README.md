@@ -8,7 +8,7 @@ you order a job (data extraction, a summary or an X thread), AI workers bid for 
 before you paid, and a NEAR contract pays the worker only if the work passes. Fail twice and the contract
 refunds you automatically.
 
-> Built at NEAR HACKATHON (Nov 2026). Tracks: `business` (Autonomous Business), `agents` (Agent Economy), `security` (AI Security & Defense).
+> Built at NEAR HACKATHON (Nov 2026). Tracks: `business` (Autonomous Business), `agents` (Agent Economy), `security` (AI Security & Defense), `swarms` (AI Swarms).
 > Runs on **NEAR testnet** with test USDC. No real money moves.
 
 ## Live
@@ -23,6 +23,16 @@ refunds you automatically.
 | Company contract | [`sharkco.testnet`](https://testnet.nearblocks.io/address/sharkco.testnet) |
 | Owners DAO (Sputnik, managed in Trezu) | [`sharkco-owners.sputnikv2.testnet`](https://testnet.nearblocks.io/address/sharkco-owners.sputnikv2.testnet) |
 | Demo post on X (video, 2:14) | _link added when the post is up_ |
+
+## Screenshots
+
+From the live app, job [`j_000006`](https://sharkco.vercel.app/jobs/j_000006) (an X thread, 1.05 test USDC):
+
+| Order: Shark writes the brief and the price | Auction: signed bids, Crab wins |
+| --- | --- |
+| ![The order page](assets/screenshots/order.png) | ![Job j_000006: brief and auction](assets/screenshots/job-auction.png) |
+| **Review: Owl's code and AI checks** | **The company: live from the contract** |
+| ![Owl's review of job j_000006](assets/screenshots/job-review.png) | ![The company dashboard](assets/screenshots/company.png) |
 
 ## Demo video
 
@@ -102,17 +112,18 @@ The demo video shows a thread because it is the easiest result to read on screen
 | Proof of what happened | None | The platform's own records | A NEAR transaction for every step |
 | Usable by another agent | With an API key | No | x402, one HTTP call |
 
-## Why these three tracks
+## Why these four tracks
 
-Shark & Co. is one product that sits where three tracks meet. What each track asks for, and the part of the project that answers it:
+Shark & Co. is one product that sits where four tracks meet. What each track asks for, and the part of the project that answers it:
 
 | Track | What the track asks for | What we built for it | Where |
 | --- | --- | --- | --- |
 | `business` · Autonomous Business | An AI-native business with treasury, sales, procurement and revenue sharing, where humans only set the constraints | Shark sells (writes the brief, prices the job, signs the quote), buys work by auction from worker agents, and the contract splits every job's revenue between the worker, the reviewer, a referrer, the owners and a reserve. The owners never run jobs: they only set price bands, the worker cap, budgets and the strike limit through a Sputnik DAO managed in Trezu | `services/shark`, `contracts/company`, owners DAO `sharkco-owners.sputnikv2.testnet` |
 | `agents` · Agent Economy | Agents that earn, spend, hire other agents and pay for services | Crab and Raven earn by bidding for jobs with their own NEAR accounts and signed prices. Shark hires them; Owl earns a fee for every review. A buyer agent orders and pays in one HTTP call with x402, no wallet popup and no gas | `services/agents`, `services/facilitator`, `services/shark/src/x402.ts` |
 | `security` · AI Security & Defense | Spending limits, policy engines, sandboxed wallets and reputation, so AI can hold money without the keys to everything | The contract enforces the limits on every agent, Shark included: quotes outside the owners' band and fees over the worker cap are rejected, Shark's wallet is topped up by at most the daily budget, and the guardian can pause but never move money. Money is released only after deterministic code checks pass. Agents that fail get strikes, then the cage. Workers see only the brief and a snapshot of the source, never the buyer's free text, so a prompt in the order can't steer them | `contracts/company/src/lib.rs`, `packages/checks`, `services/shark/src/brief.ts`, `services/shark/src/input.ts` |
+| `swarms` · AI Swarms | Coordination markets, bidding and economies between agents | Four agents with their own NEAR accounts and keys coordinate through a market, with no human in the loop: Shark asks for sealed bids, Crab and Raven each answer with a price and an ETA signed by their own key, and Shark picks on price and each worker's first-pass record under the owners' worker cap. Owl's verdict decides the payout, a worker can dispute it and a second model decides, and every outcome feeds the record the next auction reads. Shark runs as a sub-account of the company (`shark.sharkco.testnet`) | `services/shark/src/loop.ts`, `services/agents/src/worker.ts`, `services/agents/src/owl.ts` |
 
-The track hints we do not use yet are listed honestly under [What uses NEAR](#what-uses-near): NEAR Intents, Chain Signatures and a TEE attestation for Owl.
+The track hints we do not use yet are listed honestly under [What uses NEAR](#what-uses-near): NEAR Intents (and with it intent-based settlement), Chain Signatures and a TEE attestation for Owl. The swarm is small today: two workers and one reviewer, all run by the team.
 
 ## Proof on testnet
 
