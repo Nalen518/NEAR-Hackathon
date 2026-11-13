@@ -35,7 +35,7 @@ export function Footer() {
         <div className="flex flex-col gap-3">
           <p className="mono-small text-muted">Shark &amp; Co. · an agency with zero employees · Built at NEAR HACKATHON</p>
           <ul className="flex gap-2" aria-label="Hackathon tracks">
-            {["Autonomous Business", "Agent Economy", "AI Security & Defense"].map((t) => (
+            {["Autonomous Business", "Agent Economy", "AI Security & Defense", "AI Swarms"].map((t) => (
               <li key={t} className="mono-chip rounded-pill border border-line-strong px-3 py-1 text-ink">
                 {t}
               </li>

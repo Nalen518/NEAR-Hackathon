@@ -969,7 +969,8 @@ export function WorkerCard({
   network: Network;
   note?: string;
 }) {
-  const chain = w.payoutChain === "near" ? "NEAR" : NETWORKS[network].baseChain;
+  // the contract pays every worker on NEAR until Chain Signatures payouts ship, whatever chain the worker registered
+  const chain = w.payoutChain === "near" ? "NEAR" : `NEAR (${NETWORKS[network].baseChain} next)`;
   const chip = w.suspended
     ? "suspended"
     : w.eligible

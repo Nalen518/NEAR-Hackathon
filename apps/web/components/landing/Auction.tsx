@@ -112,7 +112,7 @@ export function Auction() {
                 key={w.id}
                 worker={w}
                 network={network}
-                note={w.id === "crab" ? "Fast and cheap. Wins most summaries." : `Paid in USDC on Base via Chain Signatures · payout gas ${c.reserve.ravenPayoutGas.balanceEth} ETH, about ${c.reserve.ravenPayoutGas.payoutsLeft ?? "unknown"} payouts left.`}
+                note={w.id === "crab" ? "Fast and cheap. Wins most summaries." : "Faster, pricier. Paid on NEAR today. Payouts on Base via Chain Signatures come next."}
               />
             ))}
             <ReviewerCard reviewer={c.reviewer} />

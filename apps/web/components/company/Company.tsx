@@ -107,7 +107,6 @@ const INCIDENT_LABEL: Record<Company["incidents"][number]["kind"], string> = {
 type RavenGas = Company["reserve"]["ravenPayoutGas"];
 /** Shark has no Base address or RPC for Raven yet: balance "0" and no count would read like an empty tank. */
 const gasUnset = (g: RavenGas) => g.payoutsLeft === null && Number(g.balanceEth) === 0;
-const gasLine = (g: RavenGas) => (gasUnset(g) ? "payout gas not connected" : `payout gas ${g.balanceEth} ETH, about ${g.payoutsLeft ?? "unknown"} payouts left`);
 
 function KV({ rows }: { rows: [string, ReactNode][] }) {
   return (
@@ -366,8 +365,8 @@ export function CompanyDashboard() {
         <Pane
           live={live("workers")}
           eyebrow="// workers and reviewer"
-          title="Two workers, two chains, one reviewer"
-          lede={`Crab is paid on NEAR. Raven on ${NETWORKS[network].baseChain} through Chain Signatures. Owl reviews every job in an OutLayer TEE.`}
+          title="Two workers, one reviewer"
+          lede={`Crab and Raven are paid on NEAR. Owl reviews every job: code checks, then a model. Next: Raven paid on ${NETWORKS[network].baseChain} through Chain Signatures, and Owl inside an OutLayer TEE.`}
         >
           <div className="grid grid-cols-2 gap-4 max-[1360px]:grid-cols-1">
             {c.workers.map((w) => (
@@ -378,7 +377,7 @@ export function CompanyDashboard() {
                 note={
                   w.id === "crab"
                     ? "Fast and cheap. Wins most summaries."
-                    : `Paid in USDC on Base via Chain Signatures · ${gasLine(c.reserve.ravenPayoutGas)}.`
+                    : "Faster, pricier. Paid on NEAR today. Payouts on Base via Chain Signatures come next."
                 }
               />
             ))}
@@ -663,7 +662,8 @@ function ReservePane({
 }) {
   const r = c.reserve;
   const gas = r.ravenPayoutGas;
-  const low = gas.payoutsLeft !== null && gas.payoutsLeft < gas.warnBelow;
+  // shortcut: Raven is paid on NEAR until Chain Signatures payouts ship, so an empty Base gas tank is not an alert yet
+  const low = false;
   const room = sub(r.balance, r.floor);
   const topUp =
     toBase(room) < toBase(r.dailyBudget)
@@ -731,7 +731,7 @@ function ReservePane({
         )}
         role={low ? "alert" : undefined}
       >
-        <p className="mono-label text-muted">Raven payout gas</p>
+        <p className="mono-label text-muted">Raven payout gas · not used yet</p>
         <p className="mono-data text-ink">
           {gasUnset(gas)
             ? "not connected"
@@ -742,7 +742,7 @@ function ReservePane({
             ? `Shark has no ${NETWORKS[network].baseChain} address or RPC for Raven yet. The owner sets them.`
             : low
             ? `Below ${gas.warnBelow} payouts: top it up before Raven’s payouts stop.`
-            : `${NETWORKS[network].baseChain} address derived by Chain Signatures. Below ${gas.warnBelow} payouts this line becomes a warning: top it up before Raven’s payouts stop.`}
+            : `${NETWORKS[network].baseChain} address derived by Chain Signatures, ready for Raven’s payouts on ${NETWORKS[network].baseChain}, which come next. Today Raven is paid on NEAR.`}
         </p>
       </div>
     </Pane>
@@ -862,9 +862,11 @@ function PayoutsPane({
           </p>
         </Play>
       </div>
+      {c.recentJobs.some((j) => j.attestationUrl || (j.payoutChain === "base" && j.workerPayoutTx)) && (
       <p className="mono-label text-muted">
         {"// "}review proofs · one per job
       </p>
+      )}
       <div className="flex flex-wrap gap-3">
         {c.recentJobs
           .filter((j) => j.attestationUrl)

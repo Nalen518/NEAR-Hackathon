@@ -51,15 +51,15 @@ const BEATS: Beat[] = [
   },
   {
     label: "Review",
-    title: "Owl checks the work in a TEE.",
-    body: "Code checks first, then a model check, inside OutLayer's TEE. A fail gets one revision. A worker can dispute and a different model decides.",
+    title: "Owl checks the work.",
+    body: "Code checks first, then a model check. A fail gets one revision. A worker can dispute and a different model decides.",
     stage: "Owl passes it",
     actor: ["owl", "pass"],
     head: "04 · review",
     lines: [
       ["C1 to C3 · code", "3 / 3 pass"],
       ["M1 and M2 · AI", "2 / 2 pass"],
-      ["result", "pass · attested"],
+      ["result", "pass · 5 of 5"],
     ],
     stamp: "Owl · pass",
   },

@@ -71,6 +71,6 @@ test("API down falls back to sample data with a notice", async ({ page }) => {
 test("hovering a partner chip types its line into the headline", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await page.getByRole("button", { name: /^OutLayer:/ }).hover();
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("The reviewer can’t lie.", { ignoreCase: true });
+  await page.getByRole("button", { name: /^x402:/ }).hover();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Bots pay in one call.", { ignoreCase: true });
 });

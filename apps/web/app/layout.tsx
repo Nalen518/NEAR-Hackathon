@@ -10,7 +10,7 @@ const patrick = Patrick_Hand({ variable: "--font-patrick", subsets: ["latin"], w
 
 export const metadata: Metadata = {
   title: "Shark & Co. · the zero employee agency",
-  description: "An agency with zero employees: Shark writes the brief and the price, a worker agent does the job, Owl checks it in a TEE. Fail twice and your money comes back.",
+  description: "An agency with zero employees: Shark writes the brief and the price, a worker agent does the job, Owl checks it. Fail twice and your money comes back.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

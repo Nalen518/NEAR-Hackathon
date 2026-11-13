@@ -14,8 +14,8 @@ import { Button, Mascot, ProofPill, Sample, type ProofKind } from "../ui/primiti
 // [chip, heading swap, full line for screen readers]
 const PARTNERS: [string, string, string][] = [
   ["NEAR AI", "Writes the brief.", "writes the brief and does the work"],
-  ["OutLayer", "The reviewer can’t lie.", "Owl reviews every job in a TEE"],
-  ["Chain Signatures", "Pays Raven on Base.", "pays Raven on Base"],
+  ["x402", "Bots pay in one call.", "agents order and pay in one HTTP call"],
+  ["Sputnik DAO", "Owners vote the rules.", "owners change the rules by proposal"],
   ["Trezu", "Profit goes to owners.", "owners set the limits and get the profit"],
 ];
 
@@ -147,7 +147,7 @@ export function Hero() {
                 </ul>
                 <div className="flex items-center gap-[10px] rounded-md bg-surface-2 px-3 py-[10px]">
                   <Mascot name="owl" state="pass" size={36} />
-                  <p className="body-small text-ink">Owl passed it · attested in a TEE</p>
+                  <p className="body-small text-ink">Owl passed it · 5 of 5 checks</p>
                 </div>
                 <div className="flex items-center justify-between">
                   <p className="mono-data text-gain">Crab +0.18 · Owl +0.05</p>
