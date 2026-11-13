@@ -22,7 +22,7 @@ refunds you automatically.
 | API health | https://shark-production-776f.up.railway.app/v1/health |
 | Company contract | [`sharkco.testnet`](https://testnet.nearblocks.io/address/sharkco.testnet) |
 | Owners DAO (Sputnik, managed in Trezu) | [`sharkco-owners.sputnikv2.testnet`](https://testnet.nearblocks.io/address/sharkco-owners.sputnikv2.testnet) |
-| Demo post on X (video, 2:14) | _link added when the post is up_ |
+| Demo post on X (video, 2:14) | https://x.com/sharkandco_near/status/2121200532178292999 |
 
 ## Screenshots
 
