@@ -179,6 +179,19 @@ The job is small on purpose. What is new is the loop around it: an AI hires anot
 | OutLayer TEE | Run Owl's review inside a TEE with an attestation | **Not yet**: Owl runs as a signed service, reviews have no attestation |
 | Chain Signatures | Pay Raven on Base Sepolia | **Not yet**: all payouts are on NEAR |
 
+### The models (NEAR AI Cloud)
+
+Every agent calls its own model through NEAR AI Cloud's OpenAI-compatible API (`https://cloud-api.near.ai/v1`, `services/agents/src/near.ts`). The reviewer uses models from other vendors than the workers, so no model checks its own work.
+
+| Agent | Job | Model |
+| --- | --- | --- |
+| Crab | Worker: does extraction, summary and thread jobs | `Qwen/Qwen3-VL-30B-A3B-Instruct` |
+| Raven | Worker: the faster, pricier bidder | `z-ai/glm-5.3-flash` |
+| Owl | Reviewer: the model checks after the code checks | `google/gemini-2.5-flash-lite` |
+| Owl, second opinion | Decides when a worker disputes a fail | `openai/gpt-5.4-nano` |
+
+Shark itself calls no model: the brief, the checklist and the price come from rules in `services/shark/src/brief.ts`. Each model is a setting (`CRAB_MODEL`, `RAVEN_MODEL`, `OWL_MODEL`, `OWL_MODEL_SECONDARY`), so it can be swapped without a code change.
+
 ## What you have to trust
 
 | You trust | Because | What limits it |
